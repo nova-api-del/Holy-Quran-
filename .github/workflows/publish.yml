@@ -25,6 +25,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install Deno for YouTube JavaScript challenge solving
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
       - run: pip install -r requirements.txt
       - name: Build and publish
         env:
