@@ -88,7 +88,7 @@ def discover_recitation(used_ids):
     return selected
 
 def download_complete_short(url, video_out, audio_out):
-    cmd=["yt-dlp","--no-playlist","--retries","3","--fragment-retries","3","-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4","-o",str(video_out),url]
+    cmd=YTDLP+["--no-playlist","--retries","3","--fragment-retries","3","-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4","-o",str(video_out),url]
     cookies=yt_cookie_file()
     if cookies: cmd[1:1]=["--cookies",str(cookies)]
     sh(cmd)
@@ -151,7 +151,7 @@ def scene_url():
     query=random.choice(queries)
     try:
         p=subprocess.run(
-            ["yt-dlp","--flat-playlist","--dump-single-json",f"ytsearch20:{query}"],
+            YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch20:{query}"],
             capture_output=True,text=True,check=True,timeout=180
         )
         data=json.loads(p.stdout)
