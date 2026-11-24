@@ -5,5 +5,5 @@ google-auth==2.36.0
 google-auth-oauthlib==1.2.1
 google-auth-httplib2==0.2.0
 cloudinary==1.41.0
-yt-dlp==2026.11.23
+yt-dlp[default]==2026.11.23
 # Dependency versions pinned for reproducible GitHub Actions builds.
