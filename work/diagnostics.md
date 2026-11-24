@@ -1,6 +1,6 @@
 # Latest workflow diagnostics
 
-- Checked (UTC): 2026-11-24T21:57:22.630332+00:00
+- Checked (UTC): 2026-11-24T22:20:15.780029+00:00
 - Check: YouTube OAuth secret fingerprint baseline
 - OAuth refresh: deferred to app/main.py so the exact upload-process credentials are tested once
 
@@ -8,9 +8,9 @@
 
 | Secret | Present | Length | Outer whitespace | SHA-256 fingerprint (12 chars) |
 |---|---:|---:|---:|---|
-| YOUTUBE_CLIENT_ID | True | 72 | False | 1710daecf89a |
-| YOUTUBE_CLIENT_SECRET | True | 35 | False | cbee94d164d2 |
-| YOUTUBE_REFRESH_TOKEN | True | 127 | False | cba661ebefa4 |
+| YOUTUBE_CLIENT_ID | True | 72 | False | d6ba81fd8a0a |
+| YOUTUBE_CLIENT_SECRET | True | 35 | False | 36479ed630de |
+| YOUTUBE_REFRESH_TOKEN | True | 125 | False | e57c8275e996 |
 
 ## Diagnosis
 

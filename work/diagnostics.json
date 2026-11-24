@@ -1,24 +1,24 @@
 {
-  "checked_at_utc": "2026-11-24T21:57:22.630332+00:00",
+  "checked_at_utc": "2026-11-24T22:20:15.780029+00:00",
   "check": "youtube_oauth_secret_fingerprint_diagnostics",
   "secrets": {
     "YOUTUBE_CLIENT_ID": {
       "present": true,
       "has_outer_whitespace": false,
-      "fingerprint_sha256_12": "1710daecf89a",
+      "fingerprint_sha256_12": "d6ba81fd8a0a",
       "length": 72
     },
     "YOUTUBE_CLIENT_SECRET": {
       "present": true,
       "has_outer_whitespace": false,
-      "fingerprint_sha256_12": "cbee94d164d2",
+      "fingerprint_sha256_12": "36479ed630de",
       "length": 35
     },
     "YOUTUBE_REFRESH_TOKEN": {
       "present": true,
       "has_outer_whitespace": false,
-      "fingerprint_sha256_12": "cba661ebefa4",
-      "length": 127
+      "fingerprint_sha256_12": "e57c8275e996",
+      "length": 125
     }
   },
   "oauth": {
@@ -30,25 +30,25 @@
     "Fingerprint baseline recorded. The upload process will compare these fingerprints and perform the actual OAuth refresh using the same environment values."
   ],
   "upload_process": {
-    "checked_at_utc": "2026-11-24T21:58:07Z",
+    "checked_at_utc": "2026-11-24T22:21:08Z",
     "secrets": {
       "YOUTUBE_CLIENT_ID": {
         "present": true,
         "length": 72,
         "has_outer_whitespace": false,
-        "fingerprint_sha256_12": "1710daecf89a"
+        "fingerprint_sha256_12": "d6ba81fd8a0a"
       },
       "YOUTUBE_CLIENT_SECRET": {
         "present": true,
         "length": 35,
         "has_outer_whitespace": false,
-        "fingerprint_sha256_12": "cbee94d164d2"
+        "fingerprint_sha256_12": "36479ed630de"
       },
       "YOUTUBE_REFRESH_TOKEN": {
         "present": true,
-        "length": 127,
+        "length": 125,
         "has_outer_whitespace": false,
-        "fingerprint_sha256_12": "cba661ebefa4"
+        "fingerprint_sha256_12": "e57c8275e996"
       }
     },
     "comparison_with_diagnostics": {
@@ -70,7 +70,7 @@
     },
     "oauth_refresh_tested_in_upload_process": true,
     "oauth_refresh_ok": false,
-    "oauth_error_code": "invalid_grant"
+    "oauth_error_code": "invalid_client"
   },
   "workflow": {
     "oauth_diagnostics_step": "success",
