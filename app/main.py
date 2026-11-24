@@ -131,16 +131,40 @@ def extract_audio(source_audio, start_ms, end_ms, out):
         "-t",f"{(end_ms-start_ms)/1000:.3f}","-vn","-c:a","libmp3lame","-q:a","2",str(out)])
 
 def scene_url():
-    ys=[x for x in CFG.get("visual_sources",[]) if x.get("enabled") and x.get("url")]
-    if ys: return ("youtube",random.choice(ys)["url"])
-    r=requests.get("https://api.pexels.com/videos/search",
-      headers={"Authorization":os.environ["PEXELS_API_KEY"]},
-      params={"query":"cinematic nature mountains clouds ocean night sky","per_page":30},timeout=60)
-    r.raise_for_status(); vids=r.json().get("videos",[]); random.shuffle(vids)
-    for v in vids:
-        for f in sorted(v.get("video_files",[]),key=lambda x:x.get("width",0)*x.get("height",0)):
-            if f.get("width",0)>=720 and f.get("height",0)>=1200: return ("direct",f["link"])
-    raise RuntimeError("No suitable vertical visual found.")
+    # Discover atmospheric B-roll directly on YouTube. The source video's
+    # soundtrack is never used; only its picture is layered under the recitation.
+    configured=[x for x in CFG.get("visual_sources",[]) if x.get("enabled") and x.get("url")]
+    if configured:
+        return ("youtube",random.choice(configured)["url"])
+    queries=[
+        "cinematic nature scenery 4k mountains clouds river",
+        "peaceful ocean waves sunset cinematic 4k",
+        "beautiful forest waterfall nature cinematic footage",
+        "night sky stars clouds cinematic landscape",
+        "mosque architecture peaceful cinematic footage"
+    ]
+    query=random.choice(queries)
+    try:
+        p=subprocess.run(
+            ["yt-dlp","--flat-playlist","--dump-single-json",f"ytsearch20:{query}"],
+            capture_output=True,text=True,check=True,timeout=180
+        )
+        data=json.loads(p.stdout)
+    except Exception as e:
+        raise RuntimeError(f"YouTube visual search failed: {e}")
+    candidates=[]
+    for item in data.get("entries",[]):
+        vid=item.get("id")
+        dur=item.get("duration")
+        title=(item.get("title") or "").lower()
+        if not vid or not dur or float(dur)<12: continue
+        if any(word in title for word in ["lyrics","music video","song","nasheed","recitation","quran","reaction","gameplay"]):
+            continue
+        candidates.append(item)
+    if not candidates:
+        raise RuntimeError("No suitable YouTube visual footage found.")
+    chosen=random.choice(candidates[:15])
+    return ("youtube",chosen.get("url") or f"https://www.youtube.com/watch?v={chosen['id']}")
 
 def font_path():
     for p in ["/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf","/usr/share/fonts/opentype/noto/NotoNaskhArabic-Regular.ttf"]:
