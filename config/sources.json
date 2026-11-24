@@ -1,9 +1,46 @@
 {
   "reciters": [
-    {"id":"yasser_al_dosari","name_ar":"ياسر الدوسري","enabled":false,"audio_url":"","license_note":"Add a direct URL to a recording you are authorized to republish."},
-    {"id":"abdulrahman_al_mossad","name_ar":"عبدالرحمن مسعد","enabled":false,"audio_url":"","license_note":"Add a direct URL to a recording you are authorized to republish."},
-    {"id":"other","name_ar":"قارئ آخر","enabled":false,"audio_url":"","license_note":"Add a rights-cleared source."}
+    {
+      "id": "yasser_al_dosari",
+      "name_ar": "ياسر الدوسري",
+      "enabled": true,
+      "source_type": "youtube",
+      "source_url": "",
+      "license_note": "Optional metadata only; the pipeline can process a YouTube source when configured."
+    },
+    {
+      "id": "abdulrahman_al_mossad",
+      "name_ar": "عبدالرحمن مسعد",
+      "enabled": false,
+      "source_type": "youtube",
+      "source_url": ""
+    },
+    {
+      "id": "other",
+      "name_ar": "قارئ آخر",
+      "enabled": false,
+      "source_type": "youtube",
+      "source_url": ""
+    }
   ],
-  "visual_style":{"width":1080,"height":1920,"font_size":62,"subtitle_y":1450,"reciter_y":1610},
-  "publish":{"youtube":true,"instagram":true,"max_seconds":58}
+  "visual_sources": [
+    {
+      "id": "youtube_scene_1",
+      "source_type": "youtube",
+      "url": "",
+      "enabled": false
+    }
+  ],
+  "visual_style": {
+    "width": 1080,
+    "height": 1920,
+    "font_size": 62,
+    "subtitle_y": 1450,
+    "reciter_y": 1610
+  },
+  "publish": {
+    "youtube": true,
+    "instagram": true,
+    "max_seconds": 58
+  }
 }
