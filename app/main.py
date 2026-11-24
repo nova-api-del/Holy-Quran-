@@ -7,11 +7,37 @@ ROOT=Path(__file__).resolve().parents[1]
 CFG=json.loads((ROOT/"config/sources.json").read_text(encoding="utf-8"))
 WORK=ROOT/"work"; WORK.mkdir(exist_ok=True)
 LEDGER=WORK/"published.json"
-PADDING_MS=180
+PADDING_MS=0
 
 def sh(cmd): subprocess.run(cmd, check=True)
-def ledger(): return json.loads(LEDGER.read_text()) if LEDGER.exists() else {}
-def save_ledger(x): LEDGER.write_text(json.dumps(x, ensure_ascii=False, indent=2))
+def ledger():
+    if not LEDGER.exists(): return {}
+    return json.loads(LEDGER.read_text(encoding="utf-8"))
+
+def save_ledger(x):
+    tmp=LEDGER.with_suffix(".tmp")
+    tmp.write_text(json.dumps(x, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(LEDGER)
+
+def download_cloudinary_video(url, out):
+    r=requests.get(url, timeout=180)
+    r.raise_for_status()
+    out.write_bytes(r.content)
+
+def publish_pending_clip(entry, led, path):
+    # A Cloudinary copy lets a later run resume a platform that failed,
+    # without regenerating the clip or duplicating a successful upload.
+    if not path.exists():
+        download_cloudinary_video(entry["video_url"], path)
+    if CFG["publish"].get("youtube") and not entry.get("youtube_id"):
+        entry["youtube_id"]=youtube_upload(path, entry["title"], entry["caption"])
+        save_ledger(led)
+        print("YouTube published:", entry["youtube_id"])
+    if CFG["publish"].get("instagram") and not entry.get("instagram_id"):
+        entry["instagram_id"]=instagram_reel(entry["video_url"], entry["caption"])
+        save_ledger(led)
+        print("Instagram published:", entry["instagram_id"])
+
 
 def yt_cookie_file():
     raw=os.environ.get("YOUTUBE_COOKIES")
@@ -63,8 +89,9 @@ def choose_complete_ayah_block(rec, used):
     if not candidates:
         raise RuntimeError("No unused complete consecutive ayah block is available.")
     block=random.choice(candidates)
-    start=max(0,int(block[0]["start_ms"])-PADDING_MS)
-    end=int(block[-1]["end_ms"])+PADDING_MS
+    # Use the verified ayah boundaries exactly; padding can leak adjacent recitation.
+    start=int(block[0]["start_ms"])
+    end=int(block[-1]["end_ms"])
     return block,start,end
 
 def extract_audio(source_audio, start_ms, end_ms, out):
@@ -140,24 +167,67 @@ def instagram_reel(url,caption):
     p.raise_for_status(); return p.json()["id"]
 
 def main():
+    led=ledger()
+    clips=led.setdefault("clips",{})
+    youtube_on=bool(CFG["publish"].get("youtube"))
+    instagram_on=bool(CFG["publish"].get("instagram"))
+    if not youtube_on and not instagram_on:
+        raise SystemExit("Both publishing platforms are disabled.")
+
+    # Resume the oldest incomplete clip first. Never re-upload a platform
+    # that already returned a successful publication ID.
+    pending=None
+    for key,entry in clips.items():
+        yt_done=(not youtube_on) or bool(entry.get("youtube_id"))
+        ig_done=(not instagram_on) or bool(entry.get("instagram_id"))
+        if entry.get("video_url") and not (yt_done and ig_done):
+            pending=(key,entry); break
+    if pending:
+        clip_key,entry=pending
+        publish_pending_clip(entry,led,WORK/(clip_key+".mp4"))
+        return
+
     rs=enabled()
-    if not rs: raise SystemExit("No recitation source enabled.")
+    if not rs: raise SystemExit("No recitation source enabled. Add a valid source_url.")
     rec=random.choice(rs)
     source_key=hashlib.sha256(rec["source_url"].encode()).hexdigest()[:12]
-    led=ledger(); used=led.get(source_key,[])
+    legacy_used=led.get(source_key,[]) if isinstance(led.get(source_key,[]),list) else []
+    used=list(legacy_used)
+    for item in clips.values():
+        if item.get("source_key")==source_key:
+            used.append(",".join(item.get("verse_keys",[])))
     block,start_ms,end_ms=choose_complete_ayah_block(rec,used)
     verse_keys=[v["verse_key"] for v in block]
     clip_key=hashlib.sha256((source_key+"|"+",".join(verse_keys)).encode()).hexdigest()[:12]
     source_audio=WORK/(source_key+"_source.mp3")
     if not source_audio.exists(): yt_download(rec["source_url"],source_audio,audio=True)
-    audio=WORK/(clip_key+".mp3"); extract_audio(source_audio,start_ms,end_ms,audio)
+    audio=WORK/(clip_key+".mp3")
+    extract_audio(source_audio,start_ms,end_ms,audio)
     verse_label=verse_keys[0] if len(verse_keys)==1 else f"{verse_keys[0]}–{verse_keys[-1]}"
-    out=WORK/(clip_key+".mp4"); make_video(audio,scene_url(),out,rec["name_ar"],verse_label)
-    title=f"القرآن الكريم | {rec['name_ar']} | {verse_label} #Shorts"
-    caption=f"القرآن الكريم • {rec['name_ar']} • {verse_label}\n#القرآن #قرآن #تلاوة #quran #shorts"
-    if CFG["publish"]["youtube"]: youtube_upload(out,title,caption)
+    out=WORK/(clip_key+".mp4")
+    make_video(audio,scene_url(),out,rec["name_ar"],verse_label)
+
+    # Keep the rendered master online so failed platform publishing can resume.
     public_url=cloudinary_upload(out)
-    if CFG["publish"]["instagram"]: instagram_reel(public_url,caption)
-    used.append(",".join(verse_keys)); led[source_key]=used; save_ledger(led)
+    title=f"تلاوة قرآنية خاشعة | {rec['name_ar']} | {verse_label} #Shorts"
+    caption=(f"تلاوة من القرآن الكريم بصوت {rec['name_ar']}\n"
+             f"السورة والآيات: {verse_label}\n"
+             "إذا راقت لك التلاوة شاركها لتصل إلى غيرك.\n"
+             "#القرآن #قرآن #تلاوة #quran #shorts")
+    entry={
+        "source_key":source_key,
+        "verse_keys":verse_keys,
+        "reciter":rec["name_ar"],
+        "verse_label":verse_label,
+        "title":title,
+        "caption":caption,
+        "video_url":public_url,
+        "youtube_id":None,
+        "instagram_id":None,
+        "created_at":int(time.time())
+    }
+    clips[clip_key]=entry
+    save_ledger(led)
+    publish_pending_clip(entry,led,out)
 
 if __name__=="__main__": main()
