@@ -57,8 +57,37 @@ def yt_download(url, out, audio=False):
     cmd += [url]
     sh(cmd)
 
-def enabled():
-    return [x for x in CFG["reciters"] if x.get("enabled") and x.get("source_url")]
+def discover_recitation(used_ids):
+    queries=[("yasser_al_dosari","ياسر الدوسري قرآن آيات قصيرة"),("abdulrahman_al_mossad","عبدالرحمن مسعد قرآن آيات قصيرة")]
+    candidates=[]
+    for rid,query in queries:
+        try:
+            p=subprocess.run(["yt-dlp","--flat-playlist","--dump-single-json",f"ytsearch30:{query}"],capture_output=True,text=True,check=True,timeout=180)
+            data=json.loads(p.stdout)
+        except Exception as e:
+            print(f"Search failed for {rid}: {e}"); continue
+        for item in data.get("entries",[]):
+            vid=item.get("id"); dur=item.get("duration"); title=item.get("title") or ""
+            if not vid or vid in used_ids or not dur or float(dur)>int(CFG["publish"].get("max_seconds",58)): continue
+            low=title.lower()
+            terms=["ياسر","الدوسري","yasser","dosari"] if rid=="yasser_al_dosari" else ["عبدالرحمن","مسعد","abdurrahman","abdulrahman","mossad"]
+            if not any(t in low for t in terms): continue
+            views=int(item.get("view_count") or 0)
+            if views<1000: continue
+            candidates.append({"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}","title":title,"views":views,"duration":float(dur),"reciter_id":rid})
+    if not candidates: raise RuntimeError("لم نعثر على مقاطع قصيرة مناسبة للقارئين. جرّب التشغيل لاحقاً.")
+    candidates.sort(key=lambda x:x["views"],reverse=True)
+    selected=random.choice(candidates[:min(10,len(candidates))])
+    selected["reciter"]=next(x["name_ar"] for x in CFG["reciters"] if x["id"]==selected["reciter_id"])
+    print(f"Selected {selected['title']} | views={selected['views']} | {selected['reciter']}")
+    return selected
+
+def download_complete_short(url, video_out, audio_out):
+    cmd=["yt-dlp","--no-playlist","--retries","3","--fragment-retries","3","-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4","-o",str(video_out),url]
+    cookies=yt_cookie_file()
+    if cookies: cmd[1:1]=["--cookies",str(cookies)]
+    sh(cmd)
+    sh(["ffmpeg","-y","-i",str(video_out),"-vn","-acodec","libmp3lame","-q:a","2",str(audio_out)])
 
 def duration(p):
     r=subprocess.run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(p)],capture_output=True,text=True,check=True)
@@ -173,64 +202,28 @@ def main():
     clips=led.setdefault("clips",{})
     youtube_on=bool(CFG["publish"].get("youtube"))
     instagram_on=bool(CFG["publish"].get("instagram"))
-    if not youtube_on and not instagram_on:
-        raise SystemExit("Both publishing platforms are disabled.")
-
-    # Resume the oldest incomplete clip first. Never re-upload a platform
-    # that already returned a successful publication ID.
-    pending=None
-    for key,entry in clips.items():
+    if not youtube_on and not instagram_on: raise SystemExit("Both publishing platforms are disabled.")
+    for clip_key,entry in clips.items():
         yt_done=(not youtube_on) or bool(entry.get("youtube_id"))
         ig_done=(not instagram_on) or bool(entry.get("instagram_id"))
         if entry.get("video_url") and not (yt_done and ig_done):
-            pending=(key,entry); break
-    if pending:
-        clip_key,entry=pending
-        publish_pending_clip(entry,led,WORK/(clip_key+".mp4"))
-        return
-
-    rs=enabled()
-    if not rs: raise SystemExit("No recitation source enabled. Add a valid source_url.")
-    rec=random.choice(rs)
-    source_key=hashlib.sha256(rec["source_url"].encode()).hexdigest()[:12]
-    legacy_used=led.get(source_key,[]) if isinstance(led.get(source_key,[]),list) else []
-    used=list(legacy_used)
-    for item in clips.values():
-        if item.get("source_key")==source_key:
-            used.append(",".join(item.get("verse_keys",[])))
-    block,start_ms,end_ms=choose_complete_ayah_block(rec,used)
-    verse_keys=[v["verse_key"] for v in block]
-    clip_key=hashlib.sha256((source_key+"|"+",".join(verse_keys)).encode()).hexdigest()[:12]
-    source_audio=WORK/(source_key+"_source.mp3")
-    if not source_audio.exists(): yt_download(rec["source_url"],source_audio,audio=True)
-    audio=WORK/(clip_key+".mp3")
-    extract_audio(source_audio,start_ms,end_ms,audio)
-    verse_label=verse_keys[0] if len(verse_keys)==1 else f"{verse_keys[0]}–{verse_keys[-1]}"
+            publish_pending_clip(entry,led,WORK/(clip_key+".mp4")); return
+    used_ids={e.get("source_video_id") for e in clips.values() if e.get("source_video_id")}
+    selected=discover_recitation(used_ids)
+    clip_key=hashlib.sha256(selected["id"].encode()).hexdigest()[:12]
+    source_video=WORK/(clip_key+"_source.mp4"); audio=WORK/(clip_key+".mp3")
+    if not source_video.exists() or not audio.exists(): download_complete_short(selected["url"],source_video,audio)
+    scene=scene_url()
     out=WORK/(clip_key+".mp4")
-    make_video(audio,scene_url(),out,rec["name_ar"],verse_label)
-
-    # Cloudinary is required only when Instagram is enabled. In that case it
-    # also provides a durable copy so a failed platform can resume next run.
+    make_video(audio,scene,out,selected["reciter"],"تلاوة كاملة")
     public_url=cloudinary_upload(out) if instagram_on else None
-    title=f"تلاوة قرآنية خاشعة | {rec['name_ar']} | {verse_label} #Shorts"
-    caption=(f"تلاوة من القرآن الكريم بصوت {rec['name_ar']}\n"
-             f"السورة والآيات: {verse_label}\n"
-             "إذا راقت لك التلاوة شاركها لتصل إلى غيرك.\n"
-             "#القرآن #قرآن #تلاوة #quran #shorts")
-    entry={
-        "source_key":source_key,
-        "verse_keys":verse_keys,
-        "reciter":rec["name_ar"],
-        "verse_label":verse_label,
-        "title":title,
-        "caption":caption,
-        "video_url":public_url,
-        "youtube_id":None,
-        "instagram_id":None,
-        "created_at":int(time.time())
-    }
-    clips[clip_key]=entry
-    save_ledger(led)
+    title=f"تلاوة قرآنية خاشعة | {selected['reciter']} #Shorts"
+    caption=(f"تلاوة قرآنية بصوت {selected['reciter']}\nاللهم اجعل القرآن ربيع قلوبنا.\n"
+             "#القرآن #قرآن #تلاوة #ياسر_الدوسري #عبدالرحمن_مسعد #quran #shorts")
+    entry={"source_video_id":selected["id"],"source_title":selected["title"],"source_views":selected["views"],
+           "reciter":selected["reciter"],"title":title,"caption":caption,"video_url":public_url,
+           "youtube_id":None,"instagram_id":None,"created_at":int(time.time())}
+    clips[clip_key]=entry; save_ledger(led)
     publish_pending_clip(entry,led,out)
 
 if __name__=="__main__": main()
