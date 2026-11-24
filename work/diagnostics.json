@@ -1,5 +1,5 @@
 {
-  "checked_at_utc": "2026-11-24T23:32:32.722811+00:00",
+  "checked_at_utc": "2026-11-24T23:52:58.547072+00:00",
   "check": "youtube_oauth_secret_fingerprint_diagnostics",
   "secrets": {
     "YOUTUBE_CLIENT_ID": {
@@ -30,7 +30,7 @@
     "Fingerprint baseline recorded. The upload process will compare these fingerprints and perform the actual OAuth refresh using the same environment values."
   ],
   "upload_process": {
-    "checked_at_utc": "2026-11-24T23:37:00Z",
+    "checked_at_utc": "2026-11-24T23:57:31Z",
     "secrets": {
       "YOUTUBE_CLIENT_ID": {
         "present": true,
