@@ -1,37 +1,38 @@
 # Holy Quran Auto Publisher
 
-مصنع تلقائي لمقاطع القرآن العمودية 1080x1920 لـ YouTube Shorts وInstagram Reels.
+ينشئ مقاطع عمودية للقرآن من تسجيل YouTube، مع حماية تمنع نشر مقطع إذا لم تتوفر حدود آيات موثقة.
 
-## المصادر
-تقدر تضيف روابط مباشرة أو روابط YouTube للتلاوات والمشاهد من خلال `config/sources.json`.
-القائمة تتضمن أسماء مثل ياسر الدوسري وعبدالرحمن مسعد، ويمكن إضافة أي قارئ آخر.
+## شرط اكتمال الآيات
+- يجب إضافة قائمة `verses` لكل تسجيل في `config/sources.json`.
+- كل عنصر يحتوي `verse_key` و`start_ms` و`end_ms` من نفس تسجيل YouTube نفسه.
+- يختار البرنامج آية أو آيات متتابعة من السورة نفسها فقط.
+- لا يقتطع الآية لتناسب 58 ثانية؛ إذا كانت الآية أطول ينشرها كاملة.
+- يضيف هامشاً صوتياً صغيراً قبل وبعد الحدود.
+- إذا غابت التوقيتات أو كانت غير متتابعة، يتوقف ولا ينشر.
 
-## Cookies
-إذا كانت بعض روابط YouTube تحتاج جلسة تسجيل دخول، ضع محتوى ملف cookies بصيغة Netscape في GitHub Secret باسم `YOUTUBE_COOKIES`.
-**لا تضع الكوكيز داخل الكود أو داخل المستودع.**
+مثال بنية التوقيتات (الأرقام للتوضيح فقط وليست توقيتات حقيقية):
+```json
+"verses": [
+  {"verse_key":"1:1","start_ms":0,"end_ms":6500},
+  {"verse_key":"1:2","start_ms":6500,"end_ms":11000},
+  {"verse_key":"1:3","start_ms":11000,"end_ms":17000}
+]
+```
+**لا تستخدم أرقام المثال كتوقيتات فعلية.** يجب التحقق من بداية ونهاية كل آية في نفس التسجيل.
 
-الكوكيز هنا تُستخدم فقط بواسطة yt-dlp للوصول إلى المحتوى الذي تستطيع جلسة الحساب الوصول إليه. لا ترسلها لأي خدمة أخرى.
+## YouTube Cookies
+ضع محتوى ملف Netscape cookies في GitHub Actions Secret باسم `YOUTUBE_COOKIES`. لا تضعه في المستودع أو الكود.
 
-## Pipeline
-1. يختار مصدراً.
-2. يحمله عبر yt-dlp.
-3. يختار مشهداً من YouTube أو Pexels.
-4. يصنع فيديو 1080x1920 مدته حتى 58 ثانية.
-5. يضيف هوية القناة واسم القارئ.
-6. يرفع إلى YouTube Shorts وInstagram Reels.
-7. يسجل المصدر حتى لا يتكرر.
+## Secrets للنشر
+- `YOUTUBE_CLIENT_ID`
+- `YOUTUBE_CLIENT_SECRET`
+- `YOUTUBE_REFRESH_TOKEN`
+- `PEXELS_API_KEY`
+- `CLOUDINARY_CLOUD_NAME`
+- `CLOUDINARY_API_KEY`
+- `CLOUDINARY_API_SECRET`
+- `META_ACCESS_TOKEN`
+- `IG_USER_ID`
 
-## GitHub Secrets
-YOUTUBE_COOKIES
-YOUTUBE_CLIENT_ID
-YOUTUBE_CLIENT_SECRET
-YOUTUBE_REFRESH_TOKEN
-META_ACCESS_TOKEN
-IG_USER_ID
-CLOUDINARY_CLOUD_NAME
-CLOUDINARY_API_KEY
-CLOUDINARY_API_SECRET
-PEXELS_API_KEY
-
-## التشغيل
-ضع رابط YouTube للتلاوة في `source_url`، فعّل `enabled`، ثم شغّل Workflow يدوياً للاختبار. بعد نجاح الاختبار سيعمل الجدول كل ساعتين.
+## تشغيل
+بعد إضافة رابط التلاوة وتوقيتات الآيات الموثقة، شغّل Workflow يدوياً للاختبار. الجدولة تعمل كل ساعتين.
