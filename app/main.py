@@ -11,26 +11,40 @@ LEDGER=WORK/"published.json"
 def sh(cmd): subprocess.run(cmd, check=True)
 def ledger(): return json.loads(LEDGER.read_text()) if LEDGER.exists() else {}
 def save_ledger(x): LEDGER.write_text(json.dumps(x, ensure_ascii=False, indent=2))
-def enabled(): return [x for x in CFG["reciters"] if x.get("enabled") and x.get("audio_url")]
 
-def download(url,out):
-    r=requests.get(url,timeout=120,stream=True); r.raise_for_status()
-    with open(out,"wb") as f:
-        for c in r.iter_content(1024*1024):
-            if c: f.write(c)
+def yt_cookie_file():
+    raw=os.environ.get("YOUTUBE_COOKIES")
+    if not raw: return None
+    p=WORK/"youtube_cookies.txt"; p.write_text(raw, encoding="utf-8"); return p
+
+def yt_download(url, out, audio=False):
+    cmd=["yt-dlp","--no-playlist","--retries","3","--fragment-retries","3"]
+    c=yt_cookie_file()
+    if c: cmd += ["--cookies",str(c)]
+    if audio:
+        cmd += ["-f","bestaudio/best","-x","--audio-format","mp3","-o",str(out)]
+    else:
+        cmd += ["-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4","-o",str(out)]
+    cmd += [url]
+    sh(cmd)
+
+def enabled():
+    return [x for x in CFG["reciters"] if x.get("enabled") and x.get("source_url")]
 
 def duration(p):
     r=subprocess.run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(p)],capture_output=True,text=True,check=True)
     return float(r.stdout.strip())
 
 def scene_url():
+    ys=[x for x in CFG.get("visual_sources",[]) if x.get("enabled") and x.get("url")]
+    if ys: return ("youtube", random.choice(ys)["url"])
     r=requests.get("https://api.pexels.com/videos/search",
       headers={"Authorization":os.environ["PEXELS_API_KEY"]},
       params={"query":"cinematic rain road train mountains night sky","per_page":30},timeout=60)
     r.raise_for_status(); vids=r.json().get("videos",[]); random.shuffle(vids)
     for v in vids:
         for f in sorted(v.get("video_files",[]),key=lambda x:x.get("width",0)*x.get("height",0)):
-            if f.get("width",0)>=720 and f.get("height",0)>=1200: return f["link"]
+            if f.get("width",0)>=720 and f.get("height",0)>=1200: return ("direct",f["link"])
     raise RuntimeError("No suitable vertical visual found.")
 
 def font_path():
@@ -39,7 +53,10 @@ def font_path():
     return "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
 def make_video(audio,scene,out,reciter):
-    scene_path=WORK/"scene.mp4"; download(scene,scene_path)
+    scene_path=WORK/"scene.mp4"
+    if scene[0]=="youtube": yt_download(scene[1],scene_path,audio=False)
+    else:
+        r=requests.get(scene[1],timeout=120); r.raise_for_status(); scene_path.write_bytes(r.content)
     dur=min(duration(audio),CFG["publish"]["max_seconds"])
     bg=WORK/"bg.mp4"
     sh(["ffmpeg","-y","-stream_loop","-1","-i",str(scene_path),"-t",str(dur),
@@ -86,17 +103,19 @@ def instagram_reel(url,caption):
 
 def main():
     rs=enabled()
-    if not rs: raise SystemExit("No licensed recitation source enabled.")
-    rec=random.choice(rs); key=hashlib.sha256(rec["audio_url"].encode()).hexdigest()[:12]
+    if not rs: raise SystemExit("No recitation source enabled.")
+    rec=random.choice(rs)
+    key=hashlib.sha256(rec["source_url"].encode()).hexdigest()[:12]
     led=ledger()
     if key in led: raise SystemExit("Source already published.")
-    audio=WORK/(key+".mp3"); download(rec["audio_url"],audio)
+    audio=WORK/(key+".mp3"); yt_download(rec["source_url"],audio,audio=True)
     out=WORK/(key+".mp4"); make_video(audio,scene_url(),out,rec["name_ar"])
     title=f"القرآن الكريم | {rec['name_ar']} #Shorts"
     caption=f"القرآن الكريم • {rec['name_ar']}\n#القرآن #قرآن #تلاوة #quran #shorts #reels"
     if CFG["publish"]["youtube"]: youtube_upload(out,title,caption)
     public_url=cloudinary_upload(out)
     if CFG["publish"]["instagram"]: instagram_reel(public_url,caption)
-    led[key]={"reciter":rec["name_ar"],"time":time.time()}; save_ledger(led)
+    led[key]={"reciter":rec["name_ar"],"source_url":rec["source_url"],"time":time.time()}; save_ledger(led)
 
-if __name__=="__main__": main()
+if __name__=="__main__":
+    main()
