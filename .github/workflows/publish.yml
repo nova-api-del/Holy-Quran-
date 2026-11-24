@@ -5,9 +5,13 @@ on:
       - requirements.txt
   workflow_dispatch:
   schedule:
-    - cron: "0 */2 * * *"
+    # 12:00 and 20:00 Iraq time (UTC+3)
+    - cron: "0 9,17 * * *"
 permissions:
   contents: write
+concurrency:
+  group: quran-auto-publisher
+  cancel-in-progress: false
 jobs:
   publish:
     runs-on: ubuntu-latest
