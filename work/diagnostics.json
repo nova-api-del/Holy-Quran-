@@ -1,24 +1,24 @@
 {
-  "checked_at_utc": "2026-11-24T22:20:15.780029+00:00",
+  "checked_at_utc": "2026-11-24T22:45:40.503704+00:00",
   "check": "youtube_oauth_secret_fingerprint_diagnostics",
   "secrets": {
     "YOUTUBE_CLIENT_ID": {
       "present": true,
       "has_outer_whitespace": false,
-      "fingerprint_sha256_12": "d6ba81fd8a0a",
+      "fingerprint_sha256_12": "65413ba891a0",
       "length": 72
     },
     "YOUTUBE_CLIENT_SECRET": {
       "present": true,
       "has_outer_whitespace": false,
-      "fingerprint_sha256_12": "36479ed630de",
+      "fingerprint_sha256_12": "3bd8865c894b",
       "length": 35
     },
     "YOUTUBE_REFRESH_TOKEN": {
       "present": true,
       "has_outer_whitespace": false,
-      "fingerprint_sha256_12": "e57c8275e996",
-      "length": 125
+      "fingerprint_sha256_12": "de3739a0ecc0",
+      "length": 127
     }
   },
   "oauth": {
@@ -30,25 +30,25 @@
     "Fingerprint baseline recorded. The upload process will compare these fingerprints and perform the actual OAuth refresh using the same environment values."
   ],
   "upload_process": {
-    "checked_at_utc": "2026-11-24T22:21:08Z",
+    "checked_at_utc": "2026-11-24T22:46:21Z",
     "secrets": {
       "YOUTUBE_CLIENT_ID": {
         "present": true,
         "length": 72,
         "has_outer_whitespace": false,
-        "fingerprint_sha256_12": "d6ba81fd8a0a"
+        "fingerprint_sha256_12": "65413ba891a0"
       },
       "YOUTUBE_CLIENT_SECRET": {
         "present": true,
         "length": 35,
         "has_outer_whitespace": false,
-        "fingerprint_sha256_12": "36479ed630de"
+        "fingerprint_sha256_12": "3bd8865c894b"
       },
       "YOUTUBE_REFRESH_TOKEN": {
         "present": true,
-        "length": 125,
+        "length": 127,
         "has_outer_whitespace": false,
-        "fingerprint_sha256_12": "e57c8275e996"
+        "fingerprint_sha256_12": "de3739a0ecc0"
       }
     },
     "comparison_with_diagnostics": {
@@ -69,8 +69,7 @@
       }
     },
     "oauth_refresh_tested_in_upload_process": true,
-    "oauth_refresh_ok": false,
-    "oauth_error_code": "invalid_client"
+    "oauth_refresh_ok": true
   },
   "workflow": {
     "oauth_diagnostics_step": "success",
