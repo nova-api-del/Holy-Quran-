@@ -205,10 +205,62 @@ def cloudinary_upload(path):
     return cloudinary.uploader.upload_large(str(path),resource_type="video",folder="holy-quran")["secure_url"]
 
 def youtube_upload(path,title,description):
+    import re
+    from google.auth.transport.requests import Request
+    from google.auth.exceptions import RefreshError
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
-    c=Credentials(token=None,refresh_token=os.environ["YOUTUBE_REFRESH_TOKEN"],token_uri="https://oauth2.googleapis.com/token",client_id=os.environ["YOUTUBE_CLIENT_ID"],client_secret=os.environ["YOUTUBE_CLIENT_SECRET"],scopes=["https://www.googleapis.com/auth/youtube.upload"])
+
+    names=("YOUTUBE_CLIENT_ID","YOUTUBE_CLIENT_SECRET","YOUTUBE_REFRESH_TOKEN")
+    values={name:os.environ.get(name,"") for name in names}
+    metadata={
+        name: {
+            "present":bool(value),
+            "length":len(value),
+            "has_outer_whitespace":bool(value) and value != value.strip(),
+            "fingerprint_sha256_12":hashlib.sha256(value.encode("utf-8")).hexdigest()[:12] if value else None
+        } for name,value in values.items()
+    }
+    report_path=WORK/"diagnostics.json"
+    report=json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else {}
+    diagnostic_secrets=report.get("secrets",{})
+    comparisons={}
+    for name,item in metadata.items():
+        previous=diagnostic_secrets.get(name,{})
+        comparisons[name]={
+            "fingerprint_matches_diagnostics":bool(item["fingerprint_sha256_12"]) and item["fingerprint_sha256_12"] == previous.get("fingerprint_sha256_12"),
+            "length_matches_diagnostics":item["length"] == previous.get("length"),
+            "present_in_diagnostics":bool(previous.get("present"))
+        }
+    report["upload_process"]={
+        "checked_at_utc":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()),
+        "secrets":metadata,
+        "comparison_with_diagnostics":comparisons,
+        "oauth_refresh_tested_in_upload_process":False,
+        "oauth_refresh_ok":False
+    }
+    report_path.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
+    print("YouTube OAuth secret fingerprint comparison:",
+          json.dumps({k:v["fingerprint_matches_diagnostics"] for k,v in comparisons.items()}))
+
+    if any(not value for value in values.values()):
+        raise RuntimeError("YouTube OAuth refresh failed: missing_required_secret")
+    c=Credentials(token=None,refresh_token=values["YOUTUBE_REFRESH_TOKEN"],token_uri="https://oauth2.googleapis.com/token",client_id=values["YOUTUBE_CLIENT_ID"],client_secret=values["YOUTUBE_CLIENT_SECRET"],scopes=["https://www.googleapis.com/auth/youtube.upload"])
+    try:
+        c.refresh(Request())
+        report["upload_process"]["oauth_refresh_tested_in_upload_process"]=True
+        report["upload_process"]["oauth_refresh_ok"]=True
+        report_path.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
+    except RefreshError as exc:
+        error_text=" ".join(str(part) for part in exc.args)
+        match=re.search(r"invalid_grant|invalid_client|unauthorized_client|access_denied",error_text)
+        error_code=match.group(0) if match else "refresh_error"
+        report["upload_process"]["oauth_refresh_tested_in_upload_process"]=True
+        report["upload_process"]["oauth_refresh_ok"]=False
+        report["upload_process"]["oauth_error_code"]=error_code
+        report_path.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
+        raise RuntimeError("YouTube OAuth refresh failed: "+error_code) from None
     yt=build("youtube","v3",credentials=c)
     body={"snippet":{"title":title,"description":description,"categoryId":"22"},"status":{"privacyStatus":"public","selfDeclaredMadeForKids":False}}
     req=yt.videos().insert(part="snippet,status",body=body,media_body=MediaFileUpload(str(path),chunksize=8*1024*1024,resumable=True))
