@@ -5,4 +5,4 @@ google-auth==2.36.0
 google-auth-oauthlib==1.2.1
 google-auth-httplib2==0.2.0
 cloudinary==1.41.0
-yt-dlp==2026.11.24
+yt-dlp==2026.11.23
