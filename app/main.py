@@ -10,6 +10,11 @@ LEDGER=WORK/"published.json"
 PADDING_MS=0
 
 def sh(cmd): subprocess.run(cmd, check=True)
+
+# Explicitly enable yt-dlp's maintained YouTube JavaScript challenge solvers.
+# The workflow installs Deno and yt-dlp[default]; this remote fallback keeps
+# the EJS solver available when the runner package cache is incomplete.
+YTDLP = ["yt-dlp", "--remote-components", "ejs:github"]
 def ledger():
     if not LEDGER.exists(): return {}
     return json.loads(LEDGER.read_text(encoding="utf-8"))
@@ -47,7 +52,7 @@ def yt_cookie_file():
     p=WORK/"youtube_cookies.txt"; p.write_text(raw, encoding="utf-8"); return p
 
 def yt_download(url, out, audio=False):
-    cmd=["yt-dlp","--no-playlist","--retries","3","--fragment-retries","3"]
+    cmd=YTDLP+["--no-playlist","--retries","3","--fragment-retries","3"]
     c=yt_cookie_file()
     if c: cmd += ["--cookies",str(c)]
     if audio:
@@ -62,7 +67,7 @@ def discover_recitation(used_ids):
     candidates=[]
     for rid,query in queries:
         try:
-            p=subprocess.run(["yt-dlp","--flat-playlist","--dump-single-json",f"ytsearch30:{query}"],capture_output=True,text=True,check=True,timeout=180)
+            p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch30:{query}"],capture_output=True,text=True,check=True,timeout=180)
             data=json.loads(p.stdout)
         except Exception as e:
             print(f"Search failed for {rid}: {e}"); continue
