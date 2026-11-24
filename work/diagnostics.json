@@ -1,0 +1,38 @@
+{
+  "checked_at_utc": "2026-11-24T21:35:47.849391+00:00",
+  "check": "youtube_oauth_refresh_preflight",
+  "secrets": {
+    "YOUTUBE_CLIENT_ID": {
+      "present": true,
+      "has_outer_whitespace": false,
+      "fingerprint_sha256_12": "1710daecf89a",
+      "length": 72
+    },
+    "YOUTUBE_CLIENT_SECRET": {
+      "present": true,
+      "has_outer_whitespace": false,
+      "fingerprint_sha256_12": "cbee94d164d2",
+      "length": 35
+    },
+    "YOUTUBE_REFRESH_TOKEN": {
+      "present": true,
+      "has_outer_whitespace": false,
+      "fingerprint_sha256_12": "cba661ebefa4",
+      "length": 127
+    }
+  },
+  "oauth": {
+    "tested": true,
+    "ok": false,
+    "http_status": 400,
+    "error": "invalid_grant",
+    "error_description": "Bad Request"
+  },
+  "diagnosis": [
+    "Google rejected this refresh_token/client combination (invalid_grant). Likely causes: token issued to a different OAuth client, token revoked/expired, or token pasted incorrectly. Compare the fingerprints below with the values used during token generation."
+  ],
+  "workflow": {
+    "oauth_diagnostics_step": "success",
+    "build_and_publish_step": "failure"
+  }
+}
