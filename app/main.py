@@ -201,7 +201,11 @@ def main():
     led=ledger()
     clips=led.setdefault("clips",{})
     youtube_on=bool(CFG["publish"].get("youtube"))
-    instagram_on=bool(CFG["publish"].get("instagram"))
+    instagram_requested=bool(CFG["publish"].get("instagram"))
+    instagram_secrets=["CLOUDINARY_CLOUD_NAME","CLOUDINARY_API_KEY","CLOUDINARY_API_SECRET","META_ACCESS_TOKEN","IG_USER_ID"]
+    instagram_on=instagram_requested and all(os.environ.get(k) for k in instagram_secrets)
+    if instagram_requested and not instagram_on:
+        print("Instagram is configured but its Cloudinary/Meta secrets are incomplete; YouTube can still publish.")
     if not youtube_on and not instagram_on: raise SystemExit("Both publishing platforms are disabled.")
     for clip_key,entry in clips.items():
         yt_done=(not youtube_on) or bool(entry.get("youtube_id"))
