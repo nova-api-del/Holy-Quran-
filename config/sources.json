@@ -1,0 +1,9 @@
+{
+  "reciters": [
+    {"id":"yasser_al_dosari","name_ar":"ياسر الدوسري","enabled":false,"audio_url":"","license_note":"Add a direct URL to a recording you are authorized to republish."},
+    {"id":"abdulrahman_al_mossad","name_ar":"عبدالرحمن مسعد","enabled":false,"audio_url":"","license_note":"Add a direct URL to a recording you are authorized to republish."},
+    {"id":"other","name_ar":"قارئ آخر","enabled":false,"audio_url":"","license_note":"Add a rights-cleared source."}
+  ],
+  "visual_style":{"width":1080,"height":1920,"font_size":62,"subtitle_y":1450,"reciter_y":1610},
+  "publish":{"youtube":true,"instagram":true,"max_seconds":58}
+}
