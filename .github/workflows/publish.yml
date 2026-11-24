@@ -29,8 +29,18 @@ jobs:
         uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - run: pip install -r requirements.txt
+      - name: Install Python requirements
+        run: pip install -r requirements.txt
+      - name: Diagnose YouTube OAuth credentials
+        id: oauth_diagnostics
+        continue-on-error: true
+        env:
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+        run: python app/diagnostics.py
       - name: Build and publish
+        id: build_publish
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -43,10 +53,33 @@ jobs:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
         run: python app/main.py
-      - name: Save ledger
+      - name: Record workflow result in diagnostics
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.build_publish.outcome }}
+          OAUTH_OUTCOME: ${{ steps.oauth_diagnostics.outcome }}
+        run: |
+          mkdir -p work
+          if [ ! -f work/diagnostics.md ]; then
+            printf '# Latest workflow diagnostics\n\nOAuth diagnostic script did not produce a report. Check earlier workflow steps.\n' > work/diagnostics.md
+          fi
+          printf '\n## Workflow result\n\n- OAuth diagnostic step: %s\n- Build and publish step: %s\n' "$OAUTH_OUTCOME" "$BUILD_OUTCOME" >> work/diagnostics.md
+          if [ -f work/diagnostics.json ]; then
+            python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path("work/diagnostics.json")
+          data = json.loads(p.read_text(encoding="utf-8"))
+          data["workflow"] = {"oauth_diagnostics_step": os.environ.get("OAUTH_OUTCOME"),
+                              "build_and_publish_step": os.environ.get("BUILD_OUTCOME")}
+          p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+          PY
+          fi
+      - name: Save ledger and diagnostics
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add work/published.json
-          git commit -m "chore: update publication ledger" || true
+          git add work/published.json work/diagnostics.md work/diagnostics.json 2>/dev/null || true
+          git commit -m "chore: save workflow diagnostics and publication ledger" || true
           git push || true
