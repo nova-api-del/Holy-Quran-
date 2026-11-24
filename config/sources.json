@@ -41,7 +41,7 @@
   },
   "publish": {
     "youtube": true,
-    "instagram": true,
+    "instagram": false,
     "max_seconds": 58
   }
 }
