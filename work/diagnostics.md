@@ -1,6 +1,6 @@
 # Latest workflow diagnostics
 
-- Checked (UTC): 2026-11-24T21:35:47.849391+00:00
+- Checked (UTC): 2026-11-24T21:41:53.756741+00:00
 - Check: YouTube OAuth refresh token preflight
 
 ## Secret presence and fingerprints
