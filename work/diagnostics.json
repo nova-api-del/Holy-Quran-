@@ -1,6 +1,6 @@
 {
-  "checked_at_utc": "2026-11-24T21:41:53.756741+00:00",
-  "check": "youtube_oauth_refresh_preflight",
+  "checked_at_utc": "2026-11-24T21:57:22.630332+00:00",
+  "check": "youtube_oauth_secret_fingerprint_diagnostics",
   "secrets": {
     "YOUTUBE_CLIENT_ID": {
       "present": true,
@@ -22,15 +22,56 @@
     }
   },
   "oauth": {
-    "tested": true,
+    "tested": false,
     "ok": false,
-    "http_status": 400,
-    "error": "invalid_grant",
-    "error_description": "Bad Request"
+    "note": "OAuth refresh is tested once inside app/main.py immediately before the YouTube upload."
   },
   "diagnosis": [
-    "Google rejected this refresh_token/client combination (invalid_grant). Likely causes: token issued to a different OAuth client, token revoked/expired, or token pasted incorrectly. Compare the fingerprints below with the values used during token generation."
+    "Fingerprint baseline recorded. The upload process will compare these fingerprints and perform the actual OAuth refresh using the same environment values."
   ],
+  "upload_process": {
+    "checked_at_utc": "2026-11-24T21:58:07Z",
+    "secrets": {
+      "YOUTUBE_CLIENT_ID": {
+        "present": true,
+        "length": 72,
+        "has_outer_whitespace": false,
+        "fingerprint_sha256_12": "1710daecf89a"
+      },
+      "YOUTUBE_CLIENT_SECRET": {
+        "present": true,
+        "length": 35,
+        "has_outer_whitespace": false,
+        "fingerprint_sha256_12": "cbee94d164d2"
+      },
+      "YOUTUBE_REFRESH_TOKEN": {
+        "present": true,
+        "length": 127,
+        "has_outer_whitespace": false,
+        "fingerprint_sha256_12": "cba661ebefa4"
+      }
+    },
+    "comparison_with_diagnostics": {
+      "YOUTUBE_CLIENT_ID": {
+        "fingerprint_matches_diagnostics": true,
+        "length_matches_diagnostics": true,
+        "present_in_diagnostics": true
+      },
+      "YOUTUBE_CLIENT_SECRET": {
+        "fingerprint_matches_diagnostics": true,
+        "length_matches_diagnostics": true,
+        "present_in_diagnostics": true
+      },
+      "YOUTUBE_REFRESH_TOKEN": {
+        "fingerprint_matches_diagnostics": true,
+        "length_matches_diagnostics": true,
+        "present_in_diagnostics": true
+      }
+    },
+    "oauth_refresh_tested_in_upload_process": true,
+    "oauth_refresh_ok": false,
+    "oauth_error_code": "invalid_grant"
+  },
   "workflow": {
     "oauth_diagnostics_step": "success",
     "build_and_publish_step": "failure"

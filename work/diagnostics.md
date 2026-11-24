@@ -1,7 +1,8 @@
 # Latest workflow diagnostics
 
-- Checked (UTC): 2026-11-24T21:41:53.756741+00:00
-- Check: YouTube OAuth refresh token preflight
+- Checked (UTC): 2026-11-24T21:57:22.630332+00:00
+- Check: YouTube OAuth secret fingerprint baseline
+- OAuth refresh: deferred to app/main.py so the exact upload-process credentials are tested once
 
 ## Secret presence and fingerprints
 
@@ -11,19 +12,11 @@
 | YOUTUBE_CLIENT_SECRET | True | 35 | False | cbee94d164d2 |
 | YOUTUBE_REFRESH_TOKEN | True | 127 | False | cba661ebefa4 |
 
-## Google OAuth refresh test
-
-- Tested: True
-- Success: False
-- http_status: 400
-- error: invalid_grant
-- error_description: Bad Request
-
 ## Diagnosis
 
-- Google rejected this refresh_token/client combination (invalid_grant). Likely causes: token issued to a different OAuth client, token revoked/expired, or token pasted incorrectly. Compare the fingerprints below with the values used during token generation.
+- Fingerprint baseline recorded. The upload process will compare these fingerprints and perform the actual OAuth refresh using the same environment values.
 
-> Security: raw Client Secret, Refresh Token, and Access Token are never written to this report.
+> Security: raw Client ID, Client Secret, Refresh Token, and Access Token are never written to this report.
 
 ## Workflow result
 
