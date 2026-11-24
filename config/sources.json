@@ -3,7 +3,28 @@
     {"id":"yasser_al_dosari","name_ar":"ياسر الدوسري","enabled":true},
     {"id":"abdulrahman_al_mossad","name_ar":"عبدالرحمن مسعد","enabled":true}
   ],
-  "visual_sources": [],
+  "visuals": {
+    "queries": [
+      "4k nature drone footage mountains",
+      "4k waterfall forest nature cinematic",
+      "4k ocean waves sunset drone",
+      "4k night sky stars milky way timelapse",
+      "4k clouds timelapse sky",
+      "4k desert dunes aerial drone",
+      "4k snow mountains aerial drone",
+      "4k misty forest morning cinematic",
+      "4k lake reflection sunrise landscape",
+      "4k aurora northern lights",
+      "4k mosque architecture cinematic",
+      "4k river valley aerial autumn"
+    ],
+    "segment_seconds": 5.0,
+    "min_segments": 4,
+    "max_segments": 10,
+    "crossfade_seconds": 0.5,
+    "min_height": 1080,
+    "preferred_height": 1440
+  },
   "visual_style":{"width":1080,"height":1920,"font_size":62,"subtitle_y":1450,"reciter_y":1610},
   "publish":{"youtube":true,"instagram":true,"max_seconds":58}
 }

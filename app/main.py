@@ -1,4 +1,4 @@
-import os, json, random, hashlib, subprocess, time
+import os, json, random, hashlib, subprocess, time, tempfile, shutil
 from pathlib import Path
 import requests
 from PIL import Image, ImageDraw, ImageFont
@@ -46,21 +46,19 @@ def publish_pending_clip(entry, led, path):
         print("Instagram published:", entry["instagram_id"])
 
 
+COOKIE_PATH=Path(tempfile.gettempdir())/"quran_yt_cookies.txt"
+
 def yt_cookie_file():
+    # Cookies live outside the repository so the workflow can never commit them.
     raw=os.environ.get("YOUTUBE_COOKIES")
     if not raw: return None
-    p=WORK/"youtube_cookies.txt"; p.write_text(raw, encoding="utf-8"); return p
+    COOKIE_PATH.write_text(raw, encoding="utf-8")
+    os.chmod(COOKIE_PATH,0o600)
+    return COOKIE_PATH
 
-def yt_download(url, out, audio=False):
-    cmd=YTDLP+["--no-playlist","--retries","3","--fragment-retries","3"]
+def cookie_args():
     c=yt_cookie_file()
-    if c: cmd += ["--cookies",str(c)]
-    if audio:
-        cmd += ["-f","bestaudio/best","-x","--audio-format","mp3","-o",str(out)]
-    else:
-        cmd += ["-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4","-o",str(out)]
-    cmd += [url]
-    sh(cmd)
+    return ["--cookies",str(c)] if c else []
 
 def discover_recitation(used_ids):
     queries=[("yasser_al_dosari","ياسر الدوسري قرآن آيات قصيرة"),("abdulrahman_al_mossad","عبدالرحمن مسعد قرآن آيات قصيرة")]
@@ -135,69 +133,186 @@ def extract_audio(source_audio, start_ms, end_ms, out):
     sh(["ffmpeg","-y","-ss",f"{start_ms/1000:.3f}","-i",str(source_audio),
         "-t",f"{(end_ms-start_ms)/1000:.3f}","-vn","-c:a","libmp3lame","-q:a","2",str(out)])
 
-def scene_url():
-    # Discover atmospheric B-roll directly on YouTube. The source video's
-    # soundtrack is never used; only its picture is layered under the recitation.
-    configured=[x for x in CFG.get("visual_sources",[]) if x.get("enabled") and x.get("url")]
-    if configured:
-        return ("youtube",random.choice(configured)["url"])
-    queries=[
-        "cinematic nature scenery 4k mountains clouds river",
-        "peaceful ocean waves sunset cinematic 4k",
-        "beautiful forest waterfall nature cinematic footage",
-        "night sky stars clouds cinematic landscape",
-        "mosque architecture peaceful cinematic footage"
-    ]
-    query=random.choice(queries)
-    try:
-        p=subprocess.run(
-            YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch20:{query}"],
-            capture_output=True,text=True,check=True,timeout=180
-        )
-        data=json.loads(p.stdout)
-    except Exception as e:
-        raise RuntimeError(f"YouTube visual search failed: {e}")
-    candidates=[]
-    for item in data.get("entries",[]):
-        vid=item.get("id")
-        dur=item.get("duration")
-        title=(item.get("title") or "").lower()
-        if not vid or not dur or float(dur)<12: continue
-        if any(word in title for word in ["lyrics","music video","song","nasheed","recitation","quran","reaction","gameplay"]):
+VISUAL_DEFAULTS={
+    "queries":[
+        "4k nature drone footage mountains",
+        "4k waterfall forest nature cinematic",
+        "4k ocean waves sunset drone",
+        "4k night sky stars milky way timelapse",
+        "4k clouds timelapse sky",
+        "4k desert dunes aerial drone",
+        "4k snow mountains aerial drone",
+        "4k misty forest morning cinematic",
+        "4k lake reflection sunrise landscape",
+        "4k aurora northern lights",
+        "4k mosque architecture cinematic",
+        "4k river valley aerial autumn"
+    ],
+    "blocked_words":[
+        "lyrics","music video","song","nasheed","recitation","quran","reaction","gameplay",
+        "tutorial","review","vlog","news","tiktok","shorts",
+        "girl","woman","women","model","dance","bikini","wedding","people","crowd"
+    ],
+    "min_source_seconds":40,
+    "max_source_seconds":3600,
+    "segment_seconds":5.0,
+    "min_segments":4,
+    "max_segments":10,
+    "crossfade_seconds":0.5,
+    "min_height":1080,
+    "preferred_height":1440,
+    "queries_per_run":5,
+    "results_per_query":25,
+    "max_attempt_factor":3
+}
+QUALITY_HINTS=("4k","uhd","2160","8k","5k","hdr")
+
+def visual_cfg():
+    v=dict(VISUAL_DEFAULTS); v.update(CFG.get("visuals") or {}); return v
+
+def segment_format(v):
+    # Prefer 1440p-2160p so the 9:16 centre crop is downscaled (sharp) rather than
+    # upscaled; fall back to 1080p+. AV1 is skipped for decoder compatibility.
+    lo=int(v["min_height"]); pref=int(v["preferred_height"])
+    return (f"bv*[height>={pref}][height<=2160][vcodec!^=av01]/"
+            f"bv*[height>={lo}][height<=2160][vcodec!^=av01]")
+
+def video_height(p):
+    r=subprocess.run(["ffprobe","-v","error","-select_streams","v:0","-show_entries","stream=height",
+                      "-of","default=noprint_wrappers=1:nokey=1",str(p)],capture_output=True,text=True,check=True)
+    return int(r.stdout.strip().splitlines()[0])
+
+def search_visual_candidates(v, used):
+    # Picture-only B-roll found directly on YouTube; its soundtrack is never used.
+    queries=list(v["queries"])
+    picked=random.sample(queries,k=min(int(v["queries_per_run"]),len(queries)))
+    pool={}
+    for q in picked:
+        try:
+            p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch{int(v['results_per_query'])}:{q}"],
+                             capture_output=True,text=True,check=True,timeout=180)
+            data=json.loads(p.stdout)
+        except Exception as e:
+            print(f"Visual search failed for '{q}': {e}"); continue
+        for item in data.get("entries") or []:
+            vid=item.get("id"); dur=item.get("duration"); title=item.get("title") or ""
+            if not vid or vid in used or vid in pool or not dur: continue
+            dur=float(dur)
+            if dur<float(v["min_source_seconds"]) or dur>float(v["max_source_seconds"]): continue
+            low=title.lower()
+            if any(w in low for w in v["blocked_words"]): continue
+            pool[vid]={"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}",
+                       "title":title,"duration":dur,"hinted":any(h in low for h in QUALITY_HINTS)}
+    cands=list(pool.values())
+    random.shuffle(cands)
+    cands.sort(key=lambda c: not c["hinted"])  # titles that advertise 4K/UHD first
+    print(f"Visual candidates: {len(cands)} ({sum(c['hinted'] for c in cands)} advertise 4K/UHD)")
+    return cands
+
+def fetch_scene_segment(cand, seg_len, tmp, idx, v):
+    # Download only a short window from the middle of the video (skips intros/outros).
+    total=cand["duration"]; need=seg_len+4.0
+    lo=total*0.10; hi=total*0.90-need
+    start=random.uniform(lo,hi) if hi>lo else max(0.0,(total-need)/2)
+    s=max(0.0,start-1.0); e=min(total,s+need)
+    cmd=YTDLP+cookie_args()+["--no-playlist","--retries","3","--fragment-retries","3",
+        "-f",segment_format(v),"--download-sections",f"*{s:.2f}-{e:.2f}",
+        "-o",str(tmp/f"raw{idx}.%(ext)s"),cand["url"]]
+    sh(cmd)
+    files=[f for f in tmp.glob(f"raw{idx}.*") if f.suffix.lower() in (".mp4",".webm",".mkv",".mov")]
+    if not files: raise RuntimeError("section download produced no file")
+    raw=files[0]
+    h=video_height(raw)
+    if h<int(v["min_height"]): raise RuntimeError(f"source too small ({h}p)")
+    return raw, start-s, h
+
+def normalize_segment(src, offset, seg_len, out):
+    vf=("scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,setsar=1,fps=30,"
+        "eq=brightness=-0.06:saturation=0.92,unsharp=5:5:0.35,format=yuv420p")
+    sh(["ffmpeg","-y","-ss",f"{offset:.3f}","-i",str(src),"-t",f"{seg_len:.3f}","-vf",vf,
+        "-an","-c:v","libx264","-preset","fast","-crf","15",str(out)])
+
+def build_scene_segments(dur, led, tmp):
+    v=visual_cfg(); c=float(v["crossfade_seconds"])
+    n=int(min(int(v["max_segments"]),max(int(v["min_segments"]),round(dur/float(v["segment_seconds"])))))
+    seg_len=(dur+(n-1)*c)/n+0.25
+    used=set((led.get("scenes") or {}).keys())
+    cands=search_visual_candidates(v,used)
+    if not cands: raise RuntimeError("No suitable YouTube visual footage found.")
+    segs=[]; chosen=[]; attempts=0; max_attempts=n*int(v["max_attempt_factor"])
+    for cand in cands:
+        if len(segs)>=n or attempts>=max_attempts: break
+        attempts+=1
+        idx=len(segs)
+        try:
+            raw,offset,h=fetch_scene_segment(cand,seg_len,tmp,idx,v)
+            norm=tmp/f"seg{idx}.mp4"
+            normalize_segment(raw,offset,seg_len,norm)
+            raw.unlink(missing_ok=True)
+        except Exception as e:
+            print(f"Skipping scene {cand['id']}: {e}")
+            for f in tmp.glob(f"raw{idx}.*"): f.unlink(missing_ok=True)
             continue
-        candidates.append(item)
-    if not candidates:
-        raise RuntimeError("No suitable YouTube visual footage found.")
-    chosen=random.choice(candidates[:15])
-    return ("youtube",chosen.get("url") or f"https://www.youtube.com/watch?v={chosen['id']}")
+        segs.append(norm); chosen.append(cand)
+        print(f"Scene {len(segs)}/{n}: {cand['title'][:60]} | {h}p")
+    if not segs: raise RuntimeError("Could not download any usable visual segment.")
+    return segs, chosen
 
 def font_path():
     for p in ["/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf","/usr/share/fonts/opentype/noto/NotoNaskhArabic-Regular.ttf"]:
         if os.path.exists(p): return p
     return "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
-def make_video(audio,scene,out,reciter,verse_label):
-    scene_path=WORK/"scene.mp4"
-    if scene[0]=="youtube": yt_download(scene[1],scene_path,audio=False)
-    else:
-        r=requests.get(scene[1],timeout=120); r.raise_for_status(); scene_path.write_bytes(r.content)
-    dur=duration(audio)
-    bg=WORK/"bg.mp4"
-    sh(["ffmpeg","-y","-stream_loop","-1","-i",str(scene_path),"-t",f"{dur:.3f}",
-      "-vf","scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,eq=brightness=-0.10:saturation=0.80",
-      "-an","-c:v","libx264","-preset","veryfast","-crf","20",str(bg)])
+def make_overlay(path,reciter,verse_label):
     img=Image.new("RGBA",(1080,1920),(0,0,0,0)); d=ImageDraw.Draw(img)
+    # Soft dark gradient behind the text so it stays readable on bright 4K scenes.
+    top=1250
+    for y in range(top,1920):
+        a=int(150*(((y-top)/(1920-top))**1.4))
+        d.line([(0,y),(1080,y)],fill=(0,0,0,a))
     f=ImageFont.truetype(font_path(),CFG["visual_style"]["font_size"])
     text="القرآن الكريم"; b=d.textbbox((0,0),text,font=f); x=(1080-(b[2]-b[0]))//2; y=CFG["visual_style"]["subtitle_y"]
     d.text((x+3,y+5),text,font=f,fill=(0,0,0,190),stroke_width=3,stroke_fill=(0,0,0,160))
     d.text((x,y),text,font=f,fill="white",stroke_width=1,stroke_fill="white")
     sf=ImageFont.truetype(font_path(),30)
     d.text((540,CFG["visual_style"]["reciter_y"]),f"{reciter}  •  {verse_label}",font=sf,anchor="ma",fill=(245,235,205,235))
-    overlay=WORK/"overlay.png"; img.save(overlay)
-    sh(["ffmpeg","-y","-i",str(bg),"-i",str(audio),"-loop","1","-i",str(overlay),
-      "-filter_complex","[2:v]format=rgba[ov];[0:v][ov]overlay=0:0:format=auto[v]",
-      "-map","[v]","-map","1:a:0","-t",f"{dur:.3f}","-c:v","libx264","-preset","veryfast","-crf","19",
-      "-c:a","aac","-b:a","192k","-shortest","-movflags","+faststart",str(out)])
+    img.save(path)
+
+def compose_video(audio,segs,overlay,out,dur,crossfade):
+    n=len(segs)
+    cmd=["ffmpeg","-y"]
+    for s in segs:
+        if n==1: cmd+=["-stream_loop","-1"]
+        cmd+=["-i",str(s)]
+    cmd+=["-i",str(audio),"-loop","1","-i",str(overlay)]
+    ai,oi=n,n+1
+    lens=[duration(s) for s in segs]
+    filters=[]; prev="[0:v]"; acc=lens[0]
+    for k in range(1,n):
+        lab=f"[x{k}]"
+        filters.append(f"{prev}[{k}:v]xfade=transition=fade:duration={crossfade}:offset={acc-crossfade:.3f}{lab}")
+        prev=lab; acc=acc+lens[k]-crossfade
+    # Hold the last frame if the segments come up a little short of the audio.
+    filters.append(f"{prev}tpad=stop_mode=clone:stop_duration=5[bgv]")
+    filters.append(f"[{oi}:v]format=rgba[ov]")
+    filters.append("[bgv][ov]overlay=0:0:format=auto,format=yuv420p[v]")
+    cmd+=["-filter_complex",";".join(filters),"-map","[v]","-map",f"{ai}:a:0","-t",f"{dur:.3f}",
+          "-r","30","-c:v","libx264","-preset","medium","-crf","18","-maxrate","9M","-bufsize","18M",
+          "-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-movflags","+faststart",str(out)]
+    sh(cmd)
+
+def make_video(audio,led,out,reciter,verse_label):
+    v=visual_cfg(); dur=duration(audio)
+    tmp=Path(tempfile.mkdtemp(prefix="quran_scenes_"))
+    try:
+        segs,chosen=build_scene_segments(dur,led,tmp)
+        overlay=tmp/"overlay.png"; make_overlay(overlay,reciter,verse_label)
+        compose_video(audio,segs,overlay,out,dur,float(v["crossfade_seconds"]))
+        scenes=led.setdefault("scenes",{}); now=int(time.time())
+        for c in chosen: scenes[c["id"]]={"title":c["title"],"used_at":now}  # never reused
+        return [c["id"] for c in chosen]
+    finally:
+        shutil.rmtree(tmp,ignore_errors=True)
 
 def cloudinary_upload(path):
     import cloudinary, cloudinary.uploader
@@ -298,15 +413,15 @@ def main():
     clip_key=hashlib.sha256(selected["id"].encode()).hexdigest()[:12]
     source_video=WORK/(clip_key+"_source.mp4"); audio=WORK/(clip_key+".mp3")
     if not source_video.exists() or not audio.exists(): download_complete_short(selected["url"],source_video,audio)
-    scene=scene_url()
     out=WORK/(clip_key+".mp4")
-    make_video(audio,scene,out,selected["reciter"],"تلاوة كاملة")
+    scene_ids=make_video(audio,led,out,selected["reciter"],"تلاوة كاملة")
+    save_ledger(led)
     public_url=cloudinary_upload(out) if instagram_on else None
     title=f"تلاوة قرآنية خاشعة | {selected['reciter']} #Shorts"
     caption=(f"تلاوة قرآنية بصوت {selected['reciter']}\nاللهم اجعل القرآن ربيع قلوبنا.\n"
              "#القرآن #قرآن #تلاوة #ياسر_الدوسري #عبدالرحمن_مسعد #quran #shorts")
     entry={"source_video_id":selected["id"],"source_title":selected["title"],"source_views":selected["views"],
-           "reciter":selected["reciter"],"title":title,"caption":caption,"video_url":public_url,
+           "reciter":selected["reciter"],"scene_ids":scene_ids,"title":title,"caption":caption,"video_url":public_url,
            "youtube_id":None,"instagram_id":None,"created_at":int(time.time())}
     clips[clip_key]=entry; save_ledger(led)
     publish_pending_clip(entry,led,out)

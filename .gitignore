@@ -1,0 +1,6 @@
+work/*.mp4
+work/*.mp3
+work/*.png
+work/*.tmp
+work/youtube_cookies.txt
+__pycache__/
