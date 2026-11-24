@@ -1,44 +1,30 @@
 # Holy Quran Auto Publisher
 
-ينشئ مقاطع عمودية للقرآن من تسجيل YouTube، مع حماية تمنع نشر مقطع إذا لم تتوفر حدود آيات موثقة.
+ينشئ Shorts/Reels من المقاطع القصيرة الموجودة مسبقاً للقارئين ياسر الدوسري وعبدالرحمن مسعد.
 
-## شرط اكتمال الآيات
-- يجب إضافة قائمة `verses` لكل تسجيل في `config/sources.json`.
-- كل عنصر يحتوي `verse_key` و`start_ms` و`end_ms` من نفس تسجيل YouTube نفسه.
-- يختار البرنامج آية أو آيات متتابعة من السورة نفسها فقط.
-- لا يقتطع الآية لتناسب 58 ثانية؛ إذا كانت الآية أطول ينشرها كاملة.
-- يستخدم حدود التوقيتات الموثقة كما هي دون إضافة هامش قد يُدخل صوتاً من آية مجاورة.
-- إذا غابت التوقيتات أو كانت غير متتابعة، يتوقف ولا ينشر.
+## آلية العمل
+- يبحث تلقائياً في YouTube عن مقاطع قصيرة للقارئين.
+- يستبعد المقاطع الأطول من 58 ثانية والمقاطع التي سبق استخدامها.
+- يرتب النتائج حسب المشاهدات، ثم يختار عشوائياً من أفضل 10 نتائج مؤهلة.
+- ينزّل المقطع كاملاً ويحتفظ بالصوت الأصلي دون قص أو تسريع.
+- يضيف مشهداً عمودياً من Pexels مع اسم القارئ وهوية بصرية للقناة.
+- ينشر على YouTube وInstagram عند توفر بيانات الدخول المطلوبة.
 
-مثال بنية التوقيتات (الأرقام للتوضيح فقط وليست توقيتات حقيقية):
-```json
-"verses": [
-  {"verse_key":"1:1","start_ms":0,"end_ms":6500},
-  {"verse_key":"1:2","start_ms":6500,"end_ms":11000},
-  {"verse_key":"1:3","start_ms":11000,"end_ms":17000}
-]
-```
-**لا تستخدم أرقام المثال كتوقيتات فعلية.** يجب التحقق من بداية ونهاية كل آية في نفس التسجيل.
+ملاحظة: المشاهد حالياً لقطات طبيعة وسينما هادئة عامة؛ لا يدّعي النظام مطابقة كل لقطة لمعنى آية بعينها.
 
-## YouTube Cookies
-ضع محتوى ملف Netscape cookies في GitHub Actions Secret باسم `YOUTUBE_COOKIES`. لا تضعه في المستودع أو الكود.
+## GitHub Actions Secrets
+- PEXELS_API_KEY
+- YOUTUBE_CLIENT_ID
+- YOUTUBE_CLIENT_SECRET
+- YOUTUBE_REFRESH_TOKEN
+- CLOUDINARY_CLOUD_NAME
+- CLOUDINARY_API_KEY
+- CLOUDINARY_API_SECRET
+- META_ACCESS_TOKEN
+- IG_USER_ID
+- YOUTUBE_COOKIES (اختياري)
 
-## Secrets للنشر
-- `YOUTUBE_CLIENT_ID`
-- `YOUTUBE_CLIENT_SECRET`
-- `YOUTUBE_REFRESH_TOKEN`
-- `PEXELS_API_KEY`
-- `CLOUDINARY_CLOUD_NAME` (required when Instagram is enabled)
-- `CLOUDINARY_API_KEY` (required when Instagram is enabled)
-- `CLOUDINARY_API_SECRET` (required when Instagram is enabled)
-- `META_ACCESS_TOKEN` (required when Instagram is enabled)
-- `IG_USER_ID` (required when Instagram is enabled)
+لا تضع المفاتيح أو التوكنات داخل ملفات المستودع.
 
-## منع تكرار النشر واستكمال المحاولة
-- يحفظ النظام معرّف النشر لكل منصة بشكل مستقل.
-- إذا نجح YouTube وفشل Instagram، تستكمل المحاولة التالية Instagram فقط ولا تعيد نشر المقطع على YouTube.
-- يحتفظ بنسخة الفيديو على Cloudinary لاستكمال النشر عند الحاجة.
-- تُستخدم حدود الآيات الموثقة دون هامش إضافي حتى لا يتسرب صوت من آية مجاورة.
-
-## تشغيل
-Instagram معطّل حالياً إلى حين إضافة أسرار Meta وCloudinary. بعد إضافة رابط التلاوة وتوقيتات الآيات الموثقة، شغّل Workflow يدوياً للاختبار. الجدولة تعمل يومياً مرتين: الساعة 12:00 ظهراً والساعة 20:00 مساءً بتوقيت العراق (UTC+3)، أي مقطعان يومياً لكل منصة مفعّلة.
+## الجدولة
+مرتان يومياً: 12:00 ظهراً و20:00 مساءً بتوقيت العراق (UTC+3).
