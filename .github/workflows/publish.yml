@@ -80,6 +80,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add work/published.json work/diagnostics.md work/diagnostics.json 2>/dev/null || true
+          git add -A work/ 2>/dev/null || true
           git commit -m "chore: save workflow diagnostics and publication ledger" || true
           git push || true
