@@ -34,6 +34,8 @@ def publish_pending_clip(entry, led, path):
         save_ledger(led)
         print("YouTube published:", entry["youtube_id"])
     if CFG["publish"].get("instagram") and not entry.get("instagram_id"):
+        if not entry.get("video_url"):
+            raise RuntimeError("Instagram is enabled but this clip has no Cloudinary video URL.")
         entry["instagram_id"]=instagram_reel(entry["video_url"], entry["caption"])
         save_ledger(led)
         print("Instagram published:", entry["instagram_id"])
@@ -207,8 +209,9 @@ def main():
     out=WORK/(clip_key+".mp4")
     make_video(audio,scene_url(),out,rec["name_ar"],verse_label)
 
-    # Keep the rendered master online so failed platform publishing can resume.
-    public_url=cloudinary_upload(out)
+    # Cloudinary is required only when Instagram is enabled. In that case it
+    # also provides a durable copy so a failed platform can resume next run.
+    public_url=cloudinary_upload(out) if instagram_on else None
     title=f"تلاوة قرآنية خاشعة | {rec['name_ar']} | {verse_label} #Shorts"
     caption=(f"تلاوة من القرآن الكريم بصوت {rec['name_ar']}\n"
              f"السورة والآيات: {verse_label}\n"
