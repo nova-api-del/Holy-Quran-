@@ -6,30 +6,31 @@
       "enabled": true,
       "source_type": "youtube",
       "source_url": "",
-      "license_note": "Optional metadata only; the pipeline can process a YouTube source when configured."
+      "chapter_number": null,
+      "verses": [],
+      "timestamp_help": "Add verified start_ms/end_ms for consecutive ayahs from THIS exact YouTube recording. Example: {\"verse_key\":\"1:1\",\"start_ms\":0,\"end_ms\":6500}. Do not estimate."
     },
     {
       "id": "abdulrahman_al_mossad",
       "name_ar": "عبدالرحمن مسعد",
       "enabled": false,
       "source_type": "youtube",
-      "source_url": ""
+      "source_url": "",
+      "chapter_number": null,
+      "verses": []
     },
     {
       "id": "other",
       "name_ar": "قارئ آخر",
       "enabled": false,
       "source_type": "youtube",
-      "source_url": ""
+      "source_url": "",
+      "chapter_number": null,
+      "verses": []
     }
   ],
   "visual_sources": [
-    {
-      "id": "youtube_scene_1",
-      "source_type": "youtube",
-      "url": "",
-      "enabled": false
-    }
+    {"id":"youtube_scene_1","source_type":"youtube","url":"","enabled":false}
   ],
   "visual_style": {
     "width": 1080,
