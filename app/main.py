@@ -80,10 +80,30 @@ def discover_recitation(used_ids):
             candidates.append({"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}","title":title,"views":views,"duration":float(dur),"reciter_id":rid})
     if not candidates: raise RuntimeError("لم نعثر على مقاطع قصيرة مناسبة للقارئين. جرّب التشغيل لاحقاً.")
     candidates.sort(key=lambda x:x["views"],reverse=True)
-    selected=random.choice(candidates[:min(10,len(candidates))])
-    selected["reciter"]=next(x["name_ar"] for x in CFG["reciters"] if x["id"]==selected["reciter_id"])
-    print(f"Selected {selected['title']} | views={selected['views']} | {selected['reciter']}")
-    return selected
+    # Top results in random order first, then the rest, so a removed or blocked
+    # video simply moves on to the next candidate instead of ending the run.
+    top=candidates[:10]; random.shuffle(top)
+    ordered=top+candidates[10:]
+    names={x["id"]:x["name_ar"] for x in CFG["reciters"]}
+    for c in ordered: c["reciter"]=names[c["reciter_id"]]
+    return ordered
+
+def pick_and_download(used_ids, max_tries=8):
+    tries=0
+    for selected in discover_recitation(used_ids):
+        if tries>=max_tries: break
+        tries+=1
+        clip_key=hashlib.sha256(selected["id"].encode()).hexdigest()[:12]
+        source_video=WORK/(clip_key+"_source.mp4"); audio=WORK/(clip_key+".mp3")
+        print(f"Trying {selected['title'][:70]} | views={selected['views']} | {selected['reciter']}")
+        try:
+            if not source_video.exists() or not audio.exists():
+                download_complete_short(selected["url"],source_video,audio)
+        except (subprocess.CalledProcessError, OSError) as e:
+            print(f"Skipping {selected['id']} (unavailable or download failed): {e}")
+            continue
+        return selected,clip_key,source_video,audio
+    raise RuntimeError(f"No recitation could be downloaded after {tries} attempts.")
 
 def download_complete_short(url, video_out, audio_out):
     cmd=YTDLP+["--no-playlist","--retries","3","--fragment-retries","3","-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4","-o",str(video_out),url]
@@ -409,10 +429,7 @@ def main():
         if entry.get("video_url") and not (yt_done and ig_done):
             publish_pending_clip(entry,led,WORK/(clip_key+".mp4")); return
     used_ids={e.get("source_video_id") for e in clips.values() if e.get("source_video_id")}
-    selected=discover_recitation(used_ids)
-    clip_key=hashlib.sha256(selected["id"].encode()).hexdigest()[:12]
-    source_video=WORK/(clip_key+"_source.mp4"); audio=WORK/(clip_key+".mp3")
-    if not source_video.exists() or not audio.exists(): download_complete_short(selected["url"],source_video,audio)
+    selected,clip_key,source_video,audio=pick_and_download(used_ids)
     out=WORK/(clip_key+".mp4")
     scene_ids=make_video(audio,led,out,selected["reciter"],"تلاوة كاملة")
     save_ledger(led)
