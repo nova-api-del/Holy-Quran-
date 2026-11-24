@@ -1,0 +1,102 @@
+import os, json, random, hashlib, subprocess, time
+from pathlib import Path
+import requests
+from PIL import Image, ImageDraw, ImageFont
+
+ROOT=Path(__file__).resolve().parents[1]
+CFG=json.loads((ROOT/"config/sources.json").read_text(encoding="utf-8"))
+WORK=ROOT/"work"; WORK.mkdir(exist_ok=True)
+LEDGER=WORK/"published.json"
+
+def sh(cmd): subprocess.run(cmd, check=True)
+def ledger(): return json.loads(LEDGER.read_text()) if LEDGER.exists() else {}
+def save_ledger(x): LEDGER.write_text(json.dumps(x, ensure_ascii=False, indent=2))
+def enabled(): return [x for x in CFG["reciters"] if x.get("enabled") and x.get("audio_url")]
+
+def download(url,out):
+    r=requests.get(url,timeout=120,stream=True); r.raise_for_status()
+    with open(out,"wb") as f:
+        for c in r.iter_content(1024*1024):
+            if c: f.write(c)
+
+def duration(p):
+    r=subprocess.run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(p)],capture_output=True,text=True,check=True)
+    return float(r.stdout.strip())
+
+def scene_url():
+    r=requests.get("https://api.pexels.com/videos/search",
+      headers={"Authorization":os.environ["PEXELS_API_KEY"]},
+      params={"query":"cinematic rain road train mountains night sky","per_page":30},timeout=60)
+    r.raise_for_status(); vids=r.json().get("videos",[]); random.shuffle(vids)
+    for v in vids:
+        for f in sorted(v.get("video_files",[]),key=lambda x:x.get("width",0)*x.get("height",0)):
+            if f.get("width",0)>=720 and f.get("height",0)>=1200: return f["link"]
+    raise RuntimeError("No suitable vertical visual found.")
+
+def font_path():
+    for p in ["/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf","/usr/share/fonts/opentype/noto/NotoNaskhArabic-Regular.ttf"]:
+        if os.path.exists(p): return p
+    return "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+def make_video(audio,scene,out,reciter):
+    scene_path=WORK/"scene.mp4"; download(scene,scene_path)
+    dur=min(duration(audio),CFG["publish"]["max_seconds"])
+    bg=WORK/"bg.mp4"
+    sh(["ffmpeg","-y","-stream_loop","-1","-i",str(scene_path),"-t",str(dur),
+      "-vf","scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,eq=brightness=-0.10:saturation=0.80",
+      "-an","-c:v","libx264","-preset","veryfast","-crf","20",str(bg)])
+    img=Image.new("RGBA",(1080,1920),(0,0,0,0)); d=ImageDraw.Draw(img)
+    f=ImageFont.truetype(font_path(),CFG["visual_style"]["font_size"])
+    text="القرآن الكريم"; b=d.textbbox((0,0),text,font=f); x=(1080-(b[2]-b[0]))//2; y=CFG["visual_style"]["subtitle_y"]
+    d.text((x+3,y+5),text,font=f,fill=(0,0,0,190),stroke_width=3,stroke_fill=(0,0,0,160))
+    d.text((x,y),text,font=f,fill="white",stroke_width=1,stroke_fill="white")
+    sf=ImageFont.truetype(font_path(),34)
+    d.text((540,CFG["visual_style"]["reciter_y"]),reciter,font=sf,anchor="ma",fill=(245,235,205,235))
+    overlay=WORK/"overlay.png"; img.save(overlay)
+    sh(["ffmpeg","-y","-i",str(bg),"-i",str(audio),"-loop","1","-i",str(overlay),"-t",str(dur),
+      "-filter_complex","[2:v]format=rgba[ov];[0:v][ov]overlay=0:0:format=auto[v]",
+      "-map","[v]","-map","1:a:0","-c:v","libx264","-preset","veryfast","-crf","19","-c:a","aac","-b:a","192k","-shortest","-movflags","+faststart",str(out)])
+
+def cloudinary_upload(path):
+    import cloudinary, cloudinary.uploader
+    cloudinary.config(cloud_name=os.environ["CLOUDINARY_CLOUD_NAME"],api_key=os.environ["CLOUDINARY_API_KEY"],api_secret=os.environ["CLOUDINARY_API_SECRET"])
+    return cloudinary.uploader.upload_large(str(path),resource_type="video",folder="holy-quran")["secure_url"]
+
+def youtube_upload(path,title,description):
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+    c=Credentials(token=None,refresh_token=os.environ["YOUTUBE_REFRESH_TOKEN"],token_uri="https://oauth2.googleapis.com/token",client_id=os.environ["YOUTUBE_CLIENT_ID"],client_secret=os.environ["YOUTUBE_CLIENT_SECRET"],scopes=["https://www.googleapis.com/auth/youtube.upload"])
+    yt=build("youtube","v3",credentials=c)
+    body={"snippet":{"title":title,"description":description,"categoryId":"22"},"status":{"privacyStatus":"public","selfDeclaredMadeForKids":False}}
+    req=yt.videos().insert(part="snippet,status",body=body,media_body=MediaFileUpload(str(path),chunksize=8*1024*1024,resumable=True))
+    return req.execute()["id"]
+
+def instagram_reel(url,caption):
+    token=os.environ["META_ACCESS_TOKEN"]; ig=os.environ["IG_USER_ID"]
+    r=requests.post(f"https://graph.facebook.com/v24.0/{ig}/media",data={"media_type":"REELS","video_url":url,"caption":caption,"access_token":token},timeout=60)
+    r.raise_for_status(); cid=r.json()["id"]
+    for _ in range(30):
+        s=requests.get(f"https://graph.facebook.com/v24.0/{cid}",params={"fields":"status_code","access_token":token},timeout=30)
+        s.raise_for_status()
+        if s.json().get("status_code")=="FINISHED": break
+        time.sleep(10)
+    p=requests.post(f"https://graph.facebook.com/v24.0/{ig}/media_publish",data={"creation_id":cid,"access_token":token},timeout=60)
+    p.raise_for_status(); return p.json()["id"]
+
+def main():
+    rs=enabled()
+    if not rs: raise SystemExit("No licensed recitation source enabled.")
+    rec=random.choice(rs); key=hashlib.sha256(rec["audio_url"].encode()).hexdigest()[:12]
+    led=ledger()
+    if key in led: raise SystemExit("Source already published.")
+    audio=WORK/(key+".mp3"); download(rec["audio_url"],audio)
+    out=WORK/(key+".mp4"); make_video(audio,scene_url(),out,rec["name_ar"])
+    title=f"القرآن الكريم | {rec['name_ar']} #Shorts"
+    caption=f"القرآن الكريم • {rec['name_ar']}\n#القرآن #قرآن #تلاوة #quran #shorts #reels"
+    if CFG["publish"]["youtube"]: youtube_upload(out,title,caption)
+    public_url=cloudinary_upload(out)
+    if CFG["publish"]["instagram"]: instagram_reel(public_url,caption)
+    led[key]={"reciter":rec["name_ar"],"time":time.time()}; save_ledger(led)
+
+if __name__=="__main__": main()
