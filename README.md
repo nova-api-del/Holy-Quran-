@@ -28,11 +28,11 @@
 - `YOUTUBE_CLIENT_SECRET`
 - `YOUTUBE_REFRESH_TOKEN`
 - `PEXELS_API_KEY`
-- `CLOUDINARY_CLOUD_NAME`
-- `CLOUDINARY_API_KEY`
-- `CLOUDINARY_API_SECRET`
-- `META_ACCESS_TOKEN`
-- `IG_USER_ID`
+- `CLOUDINARY_CLOUD_NAME` (required when Instagram is enabled)
+- `CLOUDINARY_API_KEY` (required when Instagram is enabled)
+- `CLOUDINARY_API_SECRET` (required when Instagram is enabled)
+- `META_ACCESS_TOKEN` (required when Instagram is enabled)
+- `IG_USER_ID` (required when Instagram is enabled)
 
 ## منع تكرار النشر واستكمال المحاولة
 - يحفظ النظام معرّف النشر لكل منصة بشكل مستقل.
@@ -41,4 +41,4 @@
 - تُستخدم حدود الآيات الموثقة دون هامش إضافي حتى لا يتسرب صوت من آية مجاورة.
 
 ## تشغيل
-بعد إضافة رابط التلاوة وتوقيتات الآيات الموثقة، شغّل Workflow يدوياً للاختبار. الجدولة تعمل يومياً مرتين: الساعة 12:00 ظهراً والساعة 20:00 مساءً بتوقيت العراق (UTC+3)، أي مقطعان يومياً لكل منصة مفعّلة.
+Instagram معطّل حالياً إلى حين إضافة أسرار Meta وCloudinary. بعد إضافة رابط التلاوة وتوقيتات الآيات الموثقة، شغّل Workflow يدوياً للاختبار. الجدولة تعمل يومياً مرتين: الساعة 12:00 ظهراً والساعة 20:00 مساءً بتوقيت العراق (UTC+3)، أي مقطعان يومياً لكل منصة مفعّلة.
