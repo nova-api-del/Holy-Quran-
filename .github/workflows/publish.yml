@@ -1,5 +1,8 @@
 name: Quran Auto Publisher
 on:
+  push:
+    paths:
+      - requirements.txt
   workflow_dispatch:
   schedule:
     - cron: "0 */2 * * *"
