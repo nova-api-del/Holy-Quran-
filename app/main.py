@@ -64,67 +64,61 @@ def cookie_args():
 def discover_recitation(used_ids):
     candidates=[]
     min_seconds=int(CFG["publish"].get("min_source_seconds",45))
-    reciters=CFG.get("reciters",[])
-    # Search YouTube generally, then use the configured names only as extra
-    # discovery hints. They are not an allowlist and never filter results.
-    queries=[
-        "قرآن كريم تلاوة خاشعة",
-        "تلاوة القرآن الكريم بصوت جميل",
-        "قرآن ترتيل كامل",
-        "quran recitation beautiful voice",
-        "quran tilawah full recitation",
-        "holy quran recitation",
-        "تلاوات قرآنية مؤثرة",
-        "قراءة القرآن الكريم",
-    ]
+    # Recitations stay restricted to the five configured reciters.
+    # Only the visual-footage search is open to general YouTube results.
+    reciters=[r for r in CFG.get("reciters",[]) if r.get("enabled",True)]
     for rec in reciters:
-        name=rec.get("name_ar")
-        if name:
-            queries.extend([
-                f"{name} قرآن تلاوة",
-                f"{name} تلاوة قرآنية",
-            ])
-    queries=list(dict.fromkeys(q for q in queries if q))
-    seen=set()
-    for query in queries:
-        try:
-            p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch50:{query}"],
-                             capture_output=True,text=True,check=True,timeout=180)
-            data=json.loads(p.stdout)
-        except Exception as e:
-            print(f"Recitation search failed for '{query}': {e}")
-            continue
-        entries=data.get("entries") or []
-        accepted=0
-        for item in entries:
-            vid=item.get("id"); dur=item.get("duration")
-            title=item.get("title") or ""
-            channel=item.get("channel") or item.get("uploader") or ""
-            if not vid or vid in used_ids or vid in seen or not dur:
+        rid=rec["id"]; name=rec["name_ar"]
+        queries=[]
+        for q in (
+            rec.get("search_query"),
+            f"{name} تلاوة قرآنية 3 دقائق",
+            f"{name} تلاوة قصيرة دقيقتين",
+            f"{name} تلاوة خاشعة قرآن",
+        ):
+            if q and q not in queries:
+                queries.append(q)
+        terms=[str(t).lower() for t in rec.get("title_terms",[])]
+        seen_for_reciter=set()
+        for query in queries:
+            try:
+                p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch50:{query}"],
+                                 capture_output=True,text=True,check=True,timeout=180)
+                data=json.loads(p.stdout)
+            except Exception as e:
+                print(f"Search failed for {rid} / {query}: {e}")
                 continue
-            dur=float(dur)
-            # No maximum source-duration restriction: full/long recitations are
-            # valid; ASR later selects a consecutive complete-ayah block.
-            if dur < min_seconds:
-                continue
-            seen.add(vid)
-            searchable=(title+" "+channel).lower()
-            matched=next((r for r in reciters
-                          if any(str(t).lower() in searchable for t in r.get("title_terms",[]))),None)
-            reciter=(matched.get("name_ar") if matched else (channel or "قارئ غير محدد"))
-            candidates.append({
-                "id":vid,
-                "url":item.get("url") or f"https://www.youtube.com/watch?v={vid}",
-                "title":title,
-                "views":int(item.get("view_count") or 0),
-                "duration":dur,
-                "reciter_id":matched.get("id") if matched else "auto",
-                "reciter":reciter
-            })
-            accepted+=1
-        print(f"Open recitation search '{query}': {len(entries)} results, {accepted} candidates (source duration >= {min_seconds}s; any reciter).")
+            entries=data.get("entries") or []
+            accepted=0
+            for item in entries:
+                vid=item.get("id"); dur=item.get("duration")
+                title=item.get("title") or ""
+                channel=item.get("channel") or item.get("uploader") or ""
+                if not vid or vid in used_ids or vid in seen_for_reciter or not dur:
+                    continue
+                dur=float(dur)
+                # No maximum source-duration cap. The final output is still
+                # cut by ASR to consecutive complete ayahs within Shorts length.
+                if dur < min_seconds:
+                    continue
+                searchable=(title+" "+channel).lower()
+                if terms and not any(term in searchable for term in terms):
+                    continue
+                seen_for_reciter.add(vid)
+                candidates.append({
+                    "id":vid,
+                    "url":item.get("url") or f"https://www.youtube.com/watch?v={vid}",
+                    "title":title,
+                    "views":int(item.get("view_count") or 0),
+                    "duration":dur,
+                    "reciter_id":rid,
+                    "reciter":name
+                })
+                accepted+=1
+            print(f"Recitation search {rid}: {len(entries)} results, {accepted} matching candidates (source duration >= {min_seconds}s; five configured reciters only).")
     if not candidates:
-        raise RuntimeError(f"لم نعثر على تلاوات قرآنية صالحة مدتها {min_seconds} ثانية أو أكثر بعد البحث المفتوح.")
+        names=", ".join(r["name_ar"] for r in reciters)
+        raise RuntimeError(f"لم نعثر على تلاوات مطابقة للقراء المحددين ({names}) ومدتها {min_seconds} ثانية أو أكثر.")
     candidates.sort(key=lambda x:(abs(min(x["duration"],175)-150),-x["views"]))
     return candidates
 
