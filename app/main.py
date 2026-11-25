@@ -65,6 +65,8 @@ def discover_recitation(used_ids):
     candidates=[]
     min_seconds=int(CFG["publish"].get("min_source_seconds",45))
     max_seconds=int(CFG["publish"].get("max_seconds",175))
+    positive_terms=("قرآن","القرآن","سورة","تلاوة","آيات","quran","surah","tilawa","tilawah")
+    blocked_terms=("دعاء","نشيد","انشودة","أناشيد","اناشيد","تواشيح","أذان","اذان","مديح","قصيدة")
     for rec in CFG["reciters"]:
         if not rec.get("enabled",True): continue
         rid=rec["id"]; name=rec["name_ar"]
@@ -95,22 +97,23 @@ def discover_recitation(used_ids):
                 dur=float(dur)
                 if dur < min_seconds or dur > max_seconds: continue
                 searchable=(title+" "+channel).lower()
-                if terms and not any(t in searchable for t in terms): continue
+                if any(term in searchable for term in blocked_terms): continue
+                if not any(term in searchable for term in positive_terms): continue
+                if terms and not any(term in searchable for term in terms): continue
                 seen_for_reciter.add(vid)
                 views=int(item.get("view_count") or 0)
                 candidates.append({"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}",
                                    "title":title,"views":views,"duration":dur,"reciter_id":rid,"reciter":name})
                 accepted+=1
-            print(f"Recitation search {rid}: {len(entries)} results, {accepted} candidates in {min_seconds}-{max_seconds}s.")
+            print(f"Recitation search {rid}: {len(entries)} results, {accepted} Quran candidates in {min_seconds}-{max_seconds}s.")
     if not candidates:
-        raise RuntimeError(f"لم نعثر على تلاوات بين {min_seconds} و{max_seconds} ثانية. راجعنا عدة صيغ بحث لكل قارئ.")
-    # Prefer a clip close to 2:30, then use views as a tie-breaker. Missing view counts
-    # never disqualify an otherwise valid recitation.
+        raise RuntimeError(f"لم نعثر على تلاوات قرآنية بين {min_seconds} و{max_seconds} ثانية للقراء المحددين.")
     candidates.sort(key=lambda x:(abs(x["duration"]-150),-x["views"]))
     return candidates
 
-def pick_and_download(used_ids, max_tries=8):
+def pick_and_download(used_ids, used_ayah_blocks=None, max_tries=16):
     tries=0
+    used_ayah_blocks=used_ayah_blocks or set()
     for selected in discover_recitation(used_ids):
         if tries>=max_tries: break
         tries+=1
@@ -120,11 +123,13 @@ def pick_and_download(used_ids, max_tries=8):
         try:
             if not source_video.exists() or not audio.exists():
                 download_complete_short(selected["url"],source_video,audio)
-        except (subprocess.CalledProcessError, OSError) as e:
-            print(f"Skipping {selected['id']} (unavailable or download failed): {e}")
+            identified=identify_and_verify_verses(audio,duration(audio),selected["reciter"])
+            choose_complete_ayah_block(identified,used_ayah_blocks)
+        except Exception as e:
+            print(f"Skipping {selected['id']} after Quran verification/download failure: {e}")
             continue
-        return selected,clip_key,source_video,audio
-    raise RuntimeError(f"No recitation could be downloaded after {tries} attempts.")
+        return selected,clip_key,source_video,audio,identified
+    raise RuntimeError(f"No complete Quran recitation passed ASR verification after {tries} attempts.")
 
 def download_complete_short(url, video_out, audio_out):
     cmd=YTDLP+["--no-playlist","--retries","3","--fragment-retries","3","-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4","-o",str(video_out),url]
@@ -358,11 +363,11 @@ def compose_video(audio,segs,overlay,out,dur,crossfade,subtitle_path=None):
           "-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-movflags","+faststart",str(out)]
     sh(cmd)
 
-def make_video(audio,led,out,reciter,verse_label,used_ayah_blocks=None):
+def make_video(audio,led,out,reciter,verse_label,used_ayah_blocks=None,identified=None):
     source_duration=duration(audio)
     tmp=Path(tempfile.mkdtemp(prefix="quran_scenes_"))
     try:
-        identified=identify_and_verify_verses(audio,source_duration,reciter)
+        identified=identified or identify_and_verify_verses(audio,source_duration,reciter)
         block,start_ms,end_ms,block_key=choose_complete_ayah_block(identified,used_ayah_blocks or set())
         clipped_audio=tmp/"complete_ayah_block.mp3"
         extract_audio(audio,start_ms,end_ms,clipped_audio)
@@ -493,10 +498,10 @@ def main():
         if entry.get("video_url") and not (yt_done and ig_done):
             publish_pending_clip(entry,led,WORK/(clip_key+".mp4")); return
     used_ids={e.get("source_video_id") for e in clips.values() if e.get("source_video_id")}
-    selected,clip_key,source_video,audio=pick_and_download(used_ids)
-    out=WORK/(clip_key+".mp4")
     used_ayah_blocks={e.get("ayah_block_key") for e in clips.values() if e.get("ayah_block_key")}
-    scene_ids,ayah_block_key,clip_info=make_video(audio,led,out,selected["reciter"],"تلاوة كاملة",used_ayah_blocks)
+    selected,clip_key,source_video,audio,identified=pick_and_download(used_ids,used_ayah_blocks)
+    out=WORK/(clip_key+".mp4")
+    scene_ids,ayah_block_key,clip_info=make_video(audio,led,out,selected["reciter"],"تلاوة كاملة",used_ayah_blocks,identified)
     save_ledger(led)
     public_url=cloudinary_upload(out) if instagram_on else None
     title=(f"تلاوة سورة {clip_info['surah_name']} | الآيات "
