@@ -242,9 +242,31 @@ def video_height(p):
                       "-of","default=noprint_wrappers=1:nokey=1",str(p)],capture_output=True,text=True,check=True)
     return int(r.stdout.strip().splitlines()[0])
 
+VISUAL_STOPWORDS={
+    "4k","8k","uhd","hdr","cinematic","footage","video","videos","clip","clips",
+    "nature","documentary","drone","aerial","shot","shots","slow","motion",
+    "timelapse","time","lapse","beautiful","best","high","quality","hd",
+    "the","and","with","over","under","from","into","for","of","in","on",
+    "a","an","to","at","by","as","is","are","was","were","that","this"
+}
+
+def visual_terms(text):
+    import re
+    words=re.findall(r"[a-z0-9]+|[\\u0600-\\u06ff]+",str(text).lower())
+    return {w for w in words if len(w)>2 and w not in VISUAL_STOPWORDS}
+
+def visual_relevance(query, title, channel=""):
+    wanted=visual_terms(query)
+    if not wanted: return 0.0, []
+    found=visual_terms(str(title)+" "+str(channel))
+    matched=sorted(wanted & found)
+    # Relevance must come from the actual scene concept, not 4K/view-count popularity.
+    return len(matched)/len(wanted), matched
+
 def search_visual_candidates(v, used, semantic_queries=None, min_duration=0):
-    # Search broadly for every ayah group: original semantic wording plus natural
-    # alternate phrasings. No source-resolution or maximum-duration restriction.
+    # Search broadly on YouTube, but rank by whether the title/channel actually
+    # reflects the ayah-specific visual concept before considering quality/views.
+    # No source-resolution or maximum-duration restriction is imposed.
     base_queries=list(semantic_queries or v["queries"])
     variants=int(v.get("search_variants_per_query",4))
     pool={}
@@ -263,17 +285,24 @@ def search_visual_candidates(v, used, semantic_queries=None, min_duration=0):
                 print(f"Visual search failed for '{q}': {e}"); continue
             for item in data.get("entries") or []:
                 vid=item.get("id"); dur=item.get("duration"); title=item.get("title") or ""
-                if not vid or vid in used or vid in pool or not dur: continue
+                channel=item.get("channel") or item.get("uploader") or ""
+                if not vid or vid in used or not dur: continue
                 dur=float(dur)
                 if dur < float(min_duration): continue
-                low=title.lower()
+                relevance,matched=visual_relevance(base,title,channel)
+                if relevance < float(v.get("min_title_relevance",0.12)):
+                    continue
                 views=int(item.get("view_count") or 0)
-                pool[vid]={"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}",
+                candidate={"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}",
                            "title":title,"duration":dur,"views":views,
-                           "hinted":any(h in low for h in QUALITY_HINTS),"query_rank":qrank}
+                           "hinted":any(h in title.lower() for h in QUALITY_HINTS),
+                           "query_rank":qrank,"relevance":relevance,"matched_terms":matched}
+                previous=pool.get(vid)
+                if previous is None or (candidate["relevance"],candidate["hinted"],candidate["views"]) > (previous["relevance"],previous["hinted"],previous["views"]):
+                    pool[vid]=candidate
     cands=list(pool.values())
-    cands.sort(key=lambda c:(not c["hinted"],-c["views"],c["query_rank"]))
-    print(f"Visual candidates: {len(cands)} from {len(base_queries)*variants} searches (all available resolutions)")
+    cands.sort(key=lambda c:(-c["relevance"],not c["hinted"],-c["views"],c["query_rank"]))
+    print(f"Visual candidates: {len(cands)} relevant matches from {len(base_queries)*variants} searches (all available resolutions)")
     return cands
 
 def fetch_scene_segment(cand, seg_len, tmp, idx, v):
@@ -327,8 +356,8 @@ def build_scene_segments(dur, led, tmp, semantic_queries=None):
             break
         if not accepted:
             print(f"No matching high-resolution scene found for chronological group {idx+1}: {query}")
-    if not segs:
-        raise RuntimeError("No usable YouTube footage could be downloaded for any ayah scene after broad fallback searches.")
+    if len(segs) != count:
+        raise RuntimeError(f"Only {len(segs)}/{count} ayah-matched visual scenes were found; refusing to publish a clip with missing or unrelated scenes.")
     return segs,chosen
 
 def font_path():
