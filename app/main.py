@@ -2,7 +2,7 @@ import os, json, random, hashlib, subprocess, time, tempfile, shutil
 from pathlib import Path
 import requests
 from PIL import Image, ImageDraw, ImageFont
-from quran_pipeline import identify_and_verify_verses, semantic_visual_queries, write_ayah_subtitles
+from quran_pipeline import identify_and_verify_verses, semantic_visual_queries, verify_visual_scene, write_ayah_subtitles
 
 ROOT=Path(__file__).resolve().parents[1]
 CFG=json.loads((ROOT/"config/sources.json").read_text(encoding="utf-8"))
@@ -340,6 +340,22 @@ def normalize_segment(src, offset, seg_len, out):
     sh(["ffmpeg","-y","-ss",f"{offset:.3f}","-i",str(src),"-t",f"{seg_len:.3f}","-vf",vf,
         "-an","-c:v","libx264","-preset","fast","-crf","15",str(out)])
 
+def extract_scene_frames(video_path, frame_dir, duration_seconds):
+    """Sample three representative JPEG frames from a downloaded scene clip."""
+    frame_dir.mkdir(parents=True, exist_ok=True)
+    paths=[]
+    for index, fraction in enumerate((0.18, 0.50, 0.82)):
+        out=frame_dir/f"frame{index}.jpg"
+        timestamp=max(0.0, min(float(duration_seconds)-0.1, float(duration_seconds)*fraction))
+        sh(["ffmpeg","-y","-ss",f"{timestamp:.3f}","-i",str(video_path),
+            "-frames:v","1","-vf","scale=640:-2","-q:v","4",str(out)])
+        if out.exists() and out.stat().st_size:
+            paths.append(out)
+    if len(paths)<2:
+        raise RuntimeError("Could not extract enough representative frames for visual verification.")
+    return paths
+
+
 def build_scene_segments(dur, led, tmp, semantic_queries=None):
     v=visual_cfg(); crossfade=float(v["crossfade_seconds"])
     count=int(min(int(v["max_segments"]),max(int(v["min_segments"]),round(dur/float(v["segment_seconds"])))))
@@ -358,6 +374,26 @@ def build_scene_segments(dur, led, tmp, semantic_queries=None):
                 raw,offset,height=fetch_scene_segment(cand,seg_len,tmp,idx,v)
                 norm=tmp/f"seg{idx}.mp4"
                 normalize_segment(raw,offset,seg_len,norm)
+                frame_dir=tmp/f"frames{idx}"
+                frame_paths=extract_scene_frames(norm,frame_dir,seg_len)
+                try:
+                    vision=verify_visual_scene(query,frame_paths)
+                except Exception as vision_error:
+                    # A temporary Gemini outage must not block publishing;
+                    # retain the existing semantic title/query ranking fallback.
+                    print(f"Visual verification unavailable for {cand['id']}: {vision_error}")
+                    vision=None
+                finally:
+                    shutil.rmtree(frame_dir,ignore_errors=True)
+                if vision is not None:
+                    print(f"Visual check {cand['id']}: score={vision['score']:.2f} match={vision['matches']} reason={vision['reason']}")
+                    if vision["score"] < 0.30 or not vision["matches"]:
+                        norm.unlink(missing_ok=True)
+                        raw.unlink(missing_ok=True)
+                        print(f"Rejecting visually unrelated scene {cand['id']}; trying next candidate.")
+                        continue
+                    cand["vision_score"]=vision["score"]
+                    cand["vision_reason"]=vision["reason"]
                 raw.unlink(missing_ok=True)
             except Exception as exc:
                 print(f"Skipping scene {cand['id']}: {exc}")
