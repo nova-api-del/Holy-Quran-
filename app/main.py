@@ -1,4 +1,4 @@
-import os, json, random, hashlib, subprocess, time, tempfile, shutil
+import os, json, random, hashlib, subprocess, time, tempfile, shutil, re
 from pathlib import Path
 import requests
 from PIL import Image, ImageDraw, ImageFont
@@ -243,16 +243,41 @@ def video_height(p):
     return int(r.stdout.strip().splitlines()[0])
 
 def search_visual_candidates(v, used, semantic_queries=None, min_duration=0):
-    # Search broadly for every ayah group: original semantic wording plus natural
-    # alternate phrasings. No source-resolution or maximum-duration restriction.
+    # Search broadly on YouTube, then rank results by whether the title actually
+    # describes the requested scene. This is relevance ranking, not a channel,
+    # license, or source allowlist.
     base_queries=list(semantic_queries or v["queries"])
     variants=int(v.get("search_variants_per_query",4))
+    generic={"cinematic","footage","video","documentary","nature","landscape","beautiful",
+             "dramatic","intense","dark","slow","motion","aerial","drone","4k","8k",
+             "uhd","shot","shots","view","views","the","with","over","from","into"}
+    synonyms={
+        "desert":{"desert","sand","dune","dunes","sahara","egypt"},
+        "sand":{"sand","desert","dune","dunes","sahara"},
+        "ancient":{"ancient","ruins","temple","pyramid","pyramids","egypt","stone"},
+        "ruins":{"ruins","ancient","temple","pyramid","pyramids","egypt","stone"},
+        "cloud":{"cloud","clouds","storm","sky"},
+        "clouds":{"cloud","clouds","storm","sky"},
+        "storm":{"storm","lightning","thunder","cloud","clouds"},
+        "lightning":{"lightning","storm","thunder"},
+        "ocean":{"ocean","sea","waves","water"},
+        "waves":{"waves","ocean","sea","water"},
+        "forest":{"forest","woods","trees","jungle"},
+        "mountain":{"mountain","mountains","peak","peaks"},
+        "mountains":{"mountain","mountains","peak","peaks"},
+        "waterfall":{"waterfall","falls","cascade"},
+        "river":{"river","stream","water"},
+    }
     pool={}
     for base in base_queries:
         qset=[base]
         for suffix in ("cinematic footage","nature documentary footage","4k cinematic video"):
             if len(qset)>=variants: break
             qset.append(f"{base} {suffix}")
+        query_words={w for w in re.findall(r"[a-z0-9]+",base.lower()) if len(w)>=4 and w not in generic}
+        expanded=set(query_words)
+        for word in query_words:
+            expanded.update(synonyms.get(word,set()))
         for qrank,q in enumerate(qset):
             try:
                 p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",
@@ -267,13 +292,19 @@ def search_visual_candidates(v, used, semantic_queries=None, min_duration=0):
                 dur=float(dur)
                 if dur < float(min_duration): continue
                 low=title.lower()
+                title_words=set(re.findall(r"[a-z0-9]+",low))
+                relevance=len(title_words & expanded)
+                # Discard obvious search-noise (e.g. unrelated apartments/music
+                # videos returned for a storm/desert query) rather than using it.
+                if query_words and relevance == 0:
+                    continue
                 views=int(item.get("view_count") or 0)
                 pool[vid]={"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}",
-                           "title":title,"duration":dur,"views":views,
+                           "title":title,"duration":dur,"views":views,"relevance":relevance,
                            "hinted":any(h in low for h in QUALITY_HINTS),"query_rank":qrank}
     cands=list(pool.values())
-    cands.sort(key=lambda c:(not c["hinted"],-c["views"],c["query_rank"]))
-    print(f"Visual candidates: {len(cands)} from {len(base_queries)*variants} searches (all available resolutions)")
+    cands.sort(key=lambda c:(-c["relevance"],not c["hinted"],-c["views"],c["query_rank"]))
+    print(f"Visual candidates: {len(cands)} relevant-title candidates from {len(base_queries)*variants} open YouTube searches (all available resolutions)")
     return cands
 
 def fetch_scene_segment(cand, seg_len, tmp, idx, v):
