@@ -91,10 +91,9 @@ def discover_recitation(used_ids):
             views=int(item.get("view_count") or 0)  # No minimum-view threshold.
             source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
             # The user confirms they have direct permission to publish these reciters' recordings.
+            # User permission covers the selected recitation sources.
             candidates.append({"id":vid,"url":source_url,"title":title,"views":views,"duration":float(dur),"reciter_id":rid,
-                              "credit_title":full.get("title") or title,
-                              "credit_creator":full.get("uploader") or full.get("channel") or rid,
-                              "credit_url":full.get("webpage_url") or full.get("original_url") or source_url,
+                              "credit_title":title,"credit_creator":rid,"credit_url":source_url})
     if not candidates: raise RuntimeError("لم نعثر على مقاطع قصيرة مناسبة للقارئين. جرّب التشغيل لاحقاً.")
     # Popularity is not a selection criterion: either requested reciter is acceptable.
     random.shuffle(candidates)
@@ -265,7 +264,7 @@ def extract_audio(source_audio, start_ms, end_ms, out):
         "-t",f"{(end_ms-start_ms)/1000:.3f}","-vn","-c:a","libmp3lame","-q:a","2",str(out)])
 
 def scene_url(excluded_urls=None):
-    # Logo/watermark screening remains mandatory before a scene is used.
+
     excluded_urls=excluded_urls or set()
     configured=[x for x in CFG.get("visual_sources",[]) if x.get("enabled") and x.get("url") and x.get("url") not in excluded_urls]
     if configured:
@@ -274,7 +273,7 @@ def scene_url(excluded_urls=None):
             source=random.choice(fresh_configured)
             return ("youtube",source["url"],{"title":source.get("title") or "YouTube visual footage",
                                             "creator":source.get("creator") or "غير محدد",
-                                            "url":source["url"],
+                                            "url":source["url"]})
     queries=[
         "cinematic nature scenery 4k mountains clouds river",
         "peaceful ocean waves sunset cinematic 4k",
@@ -307,10 +306,10 @@ def scene_url(excluded_urls=None):
             print("No new visual scenes found; reusing a previous scene as fallback.")
             return ("youtube",reused_url,{"title":"مشهد سابق من فيديو منشور",
                                           "creator":"مصدر مستخدم سابقاً",
-                                          "url":reused_url,
+                                          "url":reused_url})
         raise RuntimeError("No visual footage candidates were found and no previous scene is available.")
     chosen=random.choice(candidates[:min(15,len(candidates))])
-    credit={"title":chosen["title"],"creator":chosen["creator"],"url":chosen["url"],
+    credit={"title":chosen["title"],"creator":chosen["creator"],"url":chosen["url"]}
     return ("youtube",chosen["url"],credit)
 
 def font_path():
@@ -449,7 +448,9 @@ def main():
     public_url=cloudinary_upload(out) if instagram_on else None
     title=f"تلاوة قرآنية خاشعة | {selected['reciter']} #Shorts"
     audio_credit=(f"الصوت: {selected['credit_title']} — {selected['credit_creator']}\n"
+                  f"المصدر: {selected['credit_url']}")
     visual_credit=(f"المشاهد: {scene[2]['title']} — {scene[2]['creator']}\n"
+                   f"المصدر: {scene[2]['url']}")
     caption=(f"تلاوة قرآنية بصوت {selected['reciter']}\nاللهم اجعل القرآن ربيع قلوبنا.\n"
              "#القرآن #قرآن #تلاوة #ياسر_الدوسري #عبدالرحمن_مسعد #quran #shorts\n\n"
              f"{audio_credit}\n\n{visual_credit}\n"
