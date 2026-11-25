@@ -1,2 +1,9 @@
 work/youtube_cookies.txt
 *.cookies.txt
+work/*.mp4
+work/*.mp3
+work/*.webm
+work/*.mkv
+work/*.mov
+work/scene.*
+work/*.compressed.mp4
