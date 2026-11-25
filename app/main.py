@@ -62,6 +62,24 @@ def yt_download(url, out, audio=False):
     cmd += [url]
     sh(cmd)
 
+def video_metadata(url):
+    p=subprocess.run(YTDLP+["--no-playlist","--skip-download","--dump-single-json",url],
+                     capture_output=True,text=True,check=True,timeout=120)
+    return json.loads(p.stdout)
+
+def has_reusable_license(item):
+    license_text=" ".join(str(item.get(k) or "") for k in ("license","license_name","license_url")).lower()
+    if not license_text or any(term in license_text for term in (
+        "noncommercial","non-commercial","cc by-nc","cc-by-nc","no derivatives",
+        "no-derivatives","cc by-nd","cc-by-nd","sharealike","share-alike","cc by-sa","cc-by-sa")):
+        return False
+    license_ok=("creative commons attribution" in license_text or
+                "creativecommons.org/licenses/by/" in license_text or
+                "cc by 4.0" in license_text or "cc-by-4.0" in license_text)
+    # Require creator/title/source details so CC BY attribution can be included.
+    return bool(license_ok and (item.get("uploader") or item.get("channel") or item.get("creator"))
+                and item.get("title") and (item.get("webpage_url") or item.get("original_url") or item.get("url")))
+
 def discover_recitation(used_ids):
     queries=[("yasser_al_dosari","ياسر الدوسري قرآن آيات قصيرة"),("abdulrahman_al_mossad","عبدالرحمن مسعد قرآن آيات قصيرة")]
     candidates=[]
@@ -80,9 +98,18 @@ def discover_recitation(used_ids):
             views=int(item.get("view_count") or 0)
             if views<1000: continue
             source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
-            # License metadata is not used as an automatic discovery filter.
-            # Short duration does not itself grant permission to reuse copyrighted audio.
-            candidates.append({"id":vid,"url":source_url,"title":title,"views":views,"duration":float(dur),"reciter_id":rid})
+            try:
+                full=video_metadata(source_url)
+            except Exception as e:
+                print(f"Skipping recitation with unverifiable license {vid}: {e}")
+                continue
+            if not has_reusable_license(full):
+                print(f"Skipping recitation without an explicit reusable CC BY license: {vid}")
+                continue
+            candidates.append({"id":vid,"url":source_url,"title":title,"views":views,"duration":float(dur),"reciter_id":rid,
+                              "credit_title":full.get("title") or title,
+                              "credit_creator":full.get("uploader") or full.get("channel") or full.get("creator"),
+                              "credit_url":full.get("webpage_url") or full.get("original_url") or source_url})
     if not candidates: raise RuntimeError("لم نعثر على مقاطع قصيرة مناسبة للقارئين. جرّب التشغيل لاحقاً.")
     candidates.sort(key=lambda x:x["views"],reverse=True)
     selected=random.choice(candidates[:min(10,len(candidates))])
@@ -180,8 +207,14 @@ def scene_url(excluded_urls=None):
     excluded_urls=excluded_urls or set()
     configured=[x for x in CFG.get("visual_sources",[]) if x.get("enabled") and x.get("url") and x.get("url") not in excluded_urls]
     for source in configured:
-        # Keep configured sources eligible; branding is checked on downloaded frames.
-        return ("youtube",source["url"])
+        try:
+            meta=video_metadata(source["url"])
+            if has_reusable_license(meta):
+                return ("youtube",source["url"],{"title":meta.get("title"),"creator":meta.get("uploader") or meta.get("channel") or meta.get("creator"),
+                                                "url":meta.get("webpage_url") or meta.get("original_url") or source["url"]})
+            print("Skipping configured visual source without a reusable CC BY license.")
+        except Exception as e:
+            print(f"Skipping configured visual source with unverifiable license: {e}")
     queries=[
         "cinematic nature scenery 4k mountains clouds river",
         "peaceful ocean waves sunset cinematic 4k",
@@ -205,13 +238,21 @@ def scene_url(excluded_urls=None):
         if not vid or not dur: continue
         source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
         if source_url in excluded_urls: continue
-        # License metadata is not an automatic discovery filter.
-        # The downloaded footage is still rejected if Gemini detects branding.
+        try:
+            full=video_metadata(source_url)
+        except Exception as e:
+            print(f"Skipping visual source with unverifiable license {vid}: {e}")
+            continue
+        if not has_reusable_license(full):
+            print(f"Skipping visual source without an explicit reusable CC BY license: {vid}")
+            continue
+        item["_credit"]={"title":full.get("title"),"creator":full.get("uploader") or full.get("channel") or full.get("creator"),
+                         "url":full.get("webpage_url") or full.get("original_url") or source_url}
         candidates.append(item)
     if not candidates:
         raise RuntimeError("No visual footage candidates were found.")
     chosen=random.choice(candidates[:15])
-    return ("youtube",chosen.get("url") or f"https://www.youtube.com/watch?v={chosen['id']}")
+    return ("youtube",chosen.get("url") or f"https://www.youtube.com/watch?v={chosen['id']}",chosen["_credit"])
 
 def font_path():
     for p in ["/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf","/usr/share/fonts/opentype/noto/NotoNaskhArabic-Regular.ttf"]:
@@ -356,8 +397,14 @@ def main():
         raise RuntimeError("Could not find a scene without visible logos or watermarks after 5 attempts.")
     public_url=cloudinary_upload(out) if instagram_on else None
     title=f"تلاوة قرآنية خاشعة | {selected['reciter']} #Shorts"
+    audio_credit=(f"الصوت: {selected['credit_title']} — {selected['credit_creator']}\n"
+                  f"المصدر: {selected['credit_url']}\nالترخيص: Creative Commons Attribution (CC BY 4.0)")
+    visual_credit=(f"المشاهد: {scene[2]['title']} — {scene[2]['creator']}\n"
+                   f"المصدر: {scene[2]['url']}\nالترخيص: Creative Commons Attribution (CC BY 4.0)")
     caption=(f"تلاوة قرآنية بصوت {selected['reciter']}\nاللهم اجعل القرآن ربيع قلوبنا.\n"
-             "#القرآن #قرآن #تلاوة #ياسر_الدوسري #عبدالرحمن_مسعد #quran #shorts")
+             "#القرآن #قرآن #تلاوة #ياسر_الدوسري #عبدالرحمن_مسعد #quran #shorts\n\n"
+             f"{audio_credit}\n\n{visual_credit}\n"
+             "التعديلات: استخراج الصوت، قصّ المشاهد ودمجها مع التلاوة والنص.")
     entry={"source_video_id":selected["id"],"source_title":selected["title"],"source_views":selected["views"],
            "reciter":selected["reciter"],"title":title,"caption":caption,"video_url":public_url,
            "youtube_id":None,"instagram_id":None,"created_at":int(time.time())}
