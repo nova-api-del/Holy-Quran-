@@ -73,19 +73,6 @@ def video_metadata(url):
                      capture_output=True,text=True,check=True,timeout=120)
     return json.loads(p.stdout)
 
-def has_reusable_license(item):
-    license_text=" ".join(str(item.get(k) or "") for k in ("license","license_name","license_url")).lower()
-    if not license_text or any(term in license_text for term in (
-        "noncommercial","non-commercial","cc by-nc","cc-by-nc","no derivatives",
-        "no-derivatives","cc by-nd","cc-by-nd","sharealike","share-alike","cc by-sa","cc-by-sa")):
-        return False
-    license_ok=("creative commons attribution" in license_text or
-                "creativecommons.org/licenses/by/" in license_text or
-                "cc by 4.0" in license_text or "cc-by-4.0" in license_text)
-    # Require creator/title/source details so CC BY attribution can be included.
-    return bool(license_ok and (item.get("uploader") or item.get("channel") or item.get("creator"))
-                and item.get("title") and (item.get("webpage_url") or item.get("original_url") or item.get("url")))
-
 def discover_recitation(used_ids):
     queries=[("yasser_al_dosari","ياسر الدوسري قرآن آيات قصيرة"),("abdulrahman_al_mossad","عبدالرحمن مسعد قرآن آيات قصيرة")]
     candidates=[]
@@ -104,17 +91,10 @@ def discover_recitation(used_ids):
             views=int(item.get("view_count") or 0)  # No minimum-view threshold.
             source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
             # The user confirms they have direct permission to publish these reciters' recordings.
-            # Do not require YouTube CC BY metadata for recitation audio.
-            try:
-                full=video_metadata(source_url)
-            except Exception as e:
-                print(f"Metadata unavailable for permitted recitation {vid}; using search details: {e}")
-                full={}
             candidates.append({"id":vid,"url":source_url,"title":title,"views":views,"duration":float(dur),"reciter_id":rid,
                               "credit_title":full.get("title") or title,
                               "credit_creator":full.get("uploader") or full.get("channel") or rid,
                               "credit_url":full.get("webpage_url") or full.get("original_url") or source_url,
-                              "credit_license":full.get("license") or full.get("license_name") or "Used with permission"})
     if not candidates: raise RuntimeError("لم نعثر على مقاطع قصيرة مناسبة للقارئين. جرّب التشغيل لاحقاً.")
     # Popularity is not a selection criterion: either requested reciter is acceptable.
     random.shuffle(candidates)
@@ -152,10 +132,9 @@ def review_recitation_audio(audio_path):
     else: start=end=None
     return {"score":score,"start":start,"end":end,"notes":str(result.get("notes") or "")}
 
-def download_complete_short(url, audio_out):
+def download_complete_short(url, audio_out, source_duration=None):
     max_seconds=min(58,int(CFG["publish"].get("max_seconds",58)))
-    meta=video_metadata(url)
-    total=float(meta.get("duration") or max_seconds)
+    total=float(source_duration or max_seconds)
     base=YTDLP+["--no-playlist","--socket-timeout","30","--retries","10","--fragment-retries","10",
                 "--extractor-retries","5","--concurrent-fragments","8"]
     cookies=yt_cookie_file()
@@ -286,7 +265,6 @@ def extract_audio(source_audio, start_ms, end_ms, out):
         "-t",f"{(end_ms-start_ms)/1000:.3f}","-vn","-c:a","libmp3lame","-q:a","2",str(out)])
 
 def scene_url(excluded_urls=None):
-    # Visual footage is selected without requiring YouTube license metadata.
     # Logo/watermark screening remains mandatory before a scene is used.
     excluded_urls=excluded_urls or set()
     configured=[x for x in CFG.get("visual_sources",[]) if x.get("enabled") and x.get("url") and x.get("url") not in excluded_urls]
@@ -297,7 +275,6 @@ def scene_url(excluded_urls=None):
             return ("youtube",source["url"],{"title":source.get("title") or "YouTube visual footage",
                                             "creator":source.get("creator") or "غير محدد",
                                             "url":source["url"],
-                                            "license":"لم يتم التحقق من الترخيص"})
     queries=[
         "cinematic nature scenery 4k mountains clouds river",
         "peaceful ocean waves sunset cinematic 4k",
@@ -331,11 +308,9 @@ def scene_url(excluded_urls=None):
             return ("youtube",reused_url,{"title":"مشهد سابق من فيديو منشور",
                                           "creator":"مصدر مستخدم سابقاً",
                                           "url":reused_url,
-                                          "license":"لم يتم التحقق من الترخيص"})
         raise RuntimeError("No visual footage candidates were found and no previous scene is available.")
     chosen=random.choice(candidates[:min(15,len(candidates))])
     credit={"title":chosen["title"],"creator":chosen["creator"],"url":chosen["url"],
-            "license":"لم يتم التحقق من الترخيص"}
     return ("youtube",chosen["url"],credit)
 
 def font_path():
@@ -466,7 +441,7 @@ def main():
     selected=discover_recitation(set())
     clip_key=uuid.uuid4().hex[:12]
     audio=WORK/(clip_key+".mp3")
-    if not audio.exists(): download_complete_short(selected["url"],audio)
+    if not audio.exists(): download_complete_short(selected["url"],audio,selected["duration"])
     out=WORK/(clip_key+".mp4")
     previous_scenes={e.get("scene_url") for e in clips.values() if e.get("scene_url")}
     scene=scene_url(previous_scenes)
@@ -474,9 +449,7 @@ def main():
     public_url=cloudinary_upload(out) if instagram_on else None
     title=f"تلاوة قرآنية خاشعة | {selected['reciter']} #Shorts"
     audio_credit=(f"الصوت: {selected['credit_title']} — {selected['credit_creator']}\n"
-                  f"المصدر: {selected['credit_url']}\nالترخيص: {selected['credit_license']}")
     visual_credit=(f"المشاهد: {scene[2]['title']} — {scene[2]['creator']}\n"
-                   f"المصدر: {scene[2]['url']}\nحالة الترخيص: {scene[2]['license']}")
     caption=(f"تلاوة قرآنية بصوت {selected['reciter']}\nاللهم اجعل القرآن ربيع قلوبنا.\n"
              "#القرآن #قرآن #تلاوة #ياسر_الدوسري #عبدالرحمن_مسعد #quran #shorts\n\n"
              f"{audio_credit}\n\n{visual_credit}\n"
