@@ -62,14 +62,6 @@ def yt_download(url, out, audio=False):
     cmd += [url]
     sh(cmd)
 
-def video_metadata(url):
-    """Read the complete source metadata without downloading the media."""
-    p=subprocess.run(
-        YTDLP+["--no-playlist","--skip-download","--dump-single-json",url],
-        capture_output=True,text=True,check=True,timeout=120
-    )
-    return json.loads(p.stdout)
-
 def discover_recitation(used_ids):
     queries=[("yasser_al_dosari","ياسر الدوسري قرآن آيات قصيرة"),("abdulrahman_al_mossad","عبدالرحمن مسعد قرآن آيات قصيرة")]
     candidates=[]
@@ -217,7 +209,7 @@ def scene_url(excluded_urls=None):
         # The downloaded footage is still rejected if Gemini detects branding.
         candidates.append(item)
     if not candidates:
-        raise RuntimeError("No visual footage with a verified reusable CC BY license was found.")
+        raise RuntimeError("No visual footage candidates were found.")
     chosen=random.choice(candidates[:15])
     return ("youtube",chosen.get("url") or f"https://www.youtube.com/watch?v={chosen['id']}")
 
