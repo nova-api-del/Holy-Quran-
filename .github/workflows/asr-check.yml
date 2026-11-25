@@ -1,3 +1,4 @@
+# Feature-branch checks are safe: this workflow never uploads or publishes videos.
 name: Quran ASR Build Check
 on:
   push:
