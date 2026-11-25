@@ -14,7 +14,7 @@ permissions:
   contents: write
 concurrency:
   group: quran-auto-publisher
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 jobs:
   publish:
     # Feature branches must never auto-publish. Production runs only from main.
