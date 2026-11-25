@@ -1,6 +1,6 @@
 # Latest workflow diagnostics
 
-- Checked (UTC): 2026-11-24T23:52:58.547072+00:00
+- Checked (UTC): 2026-11-25T00:14:22.772697+00:00
 - Check: YouTube OAuth secret fingerprint baseline
 - OAuth refresh: deferred to app/main.py so the exact upload-process credentials are tested once
 
