@@ -51,6 +51,12 @@ def _load_retriever(path):
     spec = importlib.util.spec_from_file_location("quran_asr_retrieve", path)
     if spec is None or spec.loader is None:
         raise RuntimeError("Could not load the pinned Quran ayah retrieval module.")
+    # The upstream retrieval script uses bisect in Quran.find; ensure it is imported
+    # for the pinned upstream revision before loading the module.
+    source = Path(path).read_text(encoding="utf-8")
+    if "import bisect" not in source:
+        source = "import bisect\\n" + source
+        Path(path).write_text(source, encoding="utf-8")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
