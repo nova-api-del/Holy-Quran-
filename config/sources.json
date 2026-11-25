@@ -90,8 +90,8 @@
     "width": 1080,
     "height": 1920,
     "font_size": 62,
-    "subtitle_y": 1450,
-    "reciter_y": 1610
+    "subtitle_y": 1230,
+    "reciter_y": 1780
   },
   "publish": {
     "youtube": true,
