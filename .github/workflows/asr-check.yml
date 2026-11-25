@@ -1,3 +1,4 @@
+# Feature-branch checks are safe: this workflow never uploads or publishes videos.
 name: Quran ASR Build Check
 on:
   push:
@@ -32,6 +33,7 @@ jobs:
       - name: Download and initialize Quran ASR model
         run: |
           python - <<'PY'
+          from pathlib import Path
           import sherpa_onnx
           import sys
           sys.path.insert(0, 'app')
@@ -39,9 +41,11 @@ jobs:
           model, tokens, retrieve = _assets()
           module = _load_retriever(retrieve)
           quran = module.Quran(cache=str(MODEL_DIR / "quran_uthmani_hafs.json"))
+          match = quran.find("قل هو الله احد الله الصمد")
+          assert match and match["ref"] == "112:1-2", match
           recognizer = sherpa_onnx.OfflineRecognizer.from_zipformer_ctc(
               model=str(model), tokens=str(tokens), num_threads=2,
               sample_rate=16000, feature_dim=80, decoding_method="greedy_search",
               provider="cpu")
-          print("Quran ASR initialized; ayah word count:", len(quran.words))
+          print("Quran ASR initialized; ayah count:", len(quran.words))
           PY
