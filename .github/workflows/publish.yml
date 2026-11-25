@@ -83,7 +83,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # Never persist browser/session cookies or other credential material.
           rm -f work/youtube_cookies.txt
-          printf '\\n# Runtime secrets and session material\\nwork/youtube_cookies.txt\\n*.cookies.txt\\n' >> .gitignore
+          touch .gitignore
+          grep -qxF 'work/youtube_cookies.txt' .gitignore || printf '%s\\n' 'work/youtube_cookies.txt' >> .gitignore
+          grep -qxF '*.cookies.txt' .gitignore || printf '%s\\n' '*.cookies.txt' >> .gitignore
           git add .gitignore
           git add -A work/ 2>/dev/null || true
           git commit -m "chore: save workflow diagnostics and publication ledger" || true
