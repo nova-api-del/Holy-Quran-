@@ -159,16 +159,72 @@ def discover_recitation(used_ids):
     print(f"Selected {selected['title']} | views={selected['views']} | {selected['reciter']}")
     return selected
 
-def download_complete_short(url, video_out, audio_out):
+def audio_quality_score(audio_path):
+    # Technical quality only: speech presence, background noise, silence and clipping.
+    wav_path=audio_path.with_suffix(".quality.wav")
+    try:
+        sh(["ffmpeg","-y","-i",str(audio_path),"-ac","1","-ar","16000","-c:a","pcm_s16le",str(wav_path)])
+        import wave, math, array
+        with wave.open(str(wav_path),"rb") as wf:
+            rate=wf.getframerate()
+            samples=array.array("h",wf.readframes(wf.getnframes()))
+        if not samples: return -1.0
+        vals=[abs(x)/32768.0 for x in samples]
+        peak=max(vals) or 1e-9
+        frame_n=max(1,int(rate*0.02))
+        rms=[]
+        for i in range(0,len(samples)-frame_n+1,frame_n):
+            chunk=samples[i:i+frame_n]
+            rms.append(math.sqrt(sum((x/32768.0)**2 for x in chunk)/len(chunk)))
+        if not rms: return -1.0
+        ordered=sorted(rms)
+        noise=max(1e-5,ordered[int((len(ordered)-1)*0.10)])
+        loud=max(noise,ordered[int((len(ordered)-1)*0.90)])
+        snr=max(0.0,min(40.0,20*math.log10(loud/noise)))
+        active_threshold=max(noise*2.5,loud*0.08)
+        speech_ratio=sum(x>=active_threshold for x in rms)/len(rms)
+        silence_ratio=1.0-speech_ratio
+        clipping=sum(x>=0.999 for x in vals)/len(vals)
+        # Penalize dead air and clipping while favoring a clear, continuous recitation.
+        score=(snr/40.0)*45.0 + speech_ratio*40.0 + (1.0-min(1.0,clipping*100))*15.0 - silence_ratio*12.0
+        return score
+    finally:
+        wav_path.unlink(missing_ok=True)
+
+def download_complete_short(url, audio_out):
     max_seconds=int(CFG["publish"].get("max_seconds",58))
-    cmd=YTDLP+["--no-playlist","--socket-timeout","30","--retries","10","--fragment-retries","10",
-               "--extractor-retries","5","--concurrent-fragments","8","--download-sections",f"*0-{max_seconds}",
-               "--force-keyframes-at-cuts","-f","bv*[height<=1080]+ba/b[height<=1080]",
-               "--merge-output-format","mp4","-o",str(video_out),url]
+    meta=video_metadata(url)
+    total=float(meta.get("duration") or max_seconds)
+    window=min(float(max_seconds),total)
+    max_start=max(0.0,total-window)
+    starts=sorted(set(round(max_start*x,2) for x in (0.05,0.33,0.61,0.89))) if max_start>0 else [0.0]
+    base=YTDLP+["--no-playlist","--socket-timeout","30","--retries","10","--fragment-retries","10",
+                "--extractor-retries","5","--concurrent-fragments","8"]
     cookies=yt_cookie_file()
-    if cookies: cmd[1:1]=["--cookies",str(cookies)]
-    sh(cmd)
-    sh(["ffmpeg","-y","-i",str(video_out),"-t",str(max_seconds),"-vn","-acodec","libmp3lame","-q:a","2",str(audio_out)])
+    if cookies: base += ["--cookies",str(cookies)]
+    ranked=[]
+    for i,start in enumerate(starts):
+        preview=WORK/f"audio_preview_{i}.mp3"
+        preview.unlink(missing_ok=True)
+        end=min(total,start+window)
+        try:
+            sh(base+["--download-sections",f"*{start}-{end}","-f","bestaudio/best",
+                     "-x","--audio-format","mp3","--force-overwrites","-o",str(preview),url])
+            score=audio_quality_score(preview)
+            ranked.append((score,start))
+            print(f"Audio preview {i+1}: start={start:.1f}s score={score:.2f}")
+        except Exception as e:
+            print(f"Audio preview {i+1} failed: {e}")
+        finally:
+            preview.unlink(missing_ok=True)
+    if not ranked:
+        raise RuntimeError("تعذر تحليل مقاطع الصوت لاختيار أفضل جزء من التلاوة.")
+    score,start=max(ranked)
+    end=min(total,start+window)
+    print(f"Selected audio segment: {start:.2f}-{end:.2f}s | quality_score={score:.2f}")
+    audio_out.unlink(missing_ok=True)
+    sh(base+["--download-sections",f"*{start}-{end}","-f","bestaudio/best",
+             "-x","--audio-format","mp3","--force-overwrites","-o",str(audio_out),url])
 
 def duration(p):
     r=subprocess.run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(p)],capture_output=True,text=True,check=True)
@@ -414,8 +470,8 @@ def main():
     used_ids={e.get("source_video_id") for e in clips.values() if e.get("source_video_id")}
     selected=discover_recitation(used_ids)
     clip_key=hashlib.sha256(selected["id"].encode()).hexdigest()[:12]
-    source_video=WORK/(clip_key+"_source.mp4"); audio=WORK/(clip_key+".mp3")
-    if not source_video.exists() or not audio.exists(): download_complete_short(selected["url"],source_video,audio)
+    audio=WORK/(clip_key+".mp3")
+    if not audio.exists(): download_complete_short(selected["url"],audio)
     out=WORK/(clip_key+".mp4")
     scene=scene_url()
     make_video(audio,scene,out,selected["reciter"],"تلاوة كاملة")
