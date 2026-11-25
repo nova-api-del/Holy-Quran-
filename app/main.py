@@ -117,7 +117,7 @@ def discover_recitation(used_ids):
                               "credit_license":full.get("license") or full.get("license_name") or "Used with permission"})
     if not candidates: raise RuntimeError("لم نعثر على مقاطع قصيرة مناسبة للقارئين. جرّب التشغيل لاحقاً.")
     candidates.sort(key=lambda x:x["views"],reverse=True)
-    selected=random.choice(candidates[:min(10,len(candidates))])
+    selected=max(candidates,key=lambda x:x["views"])
     selected["reciter"]=next(x["name_ar"] for x in CFG["reciters"] if x["id"]==selected["reciter_id"])
     print(f"Selected {selected['title']} | views={selected['views']} | {selected['reciter']}")
     return selected
@@ -180,7 +180,7 @@ def download_complete_short(url, audio_out):
                 if verdict["start"] is not None and verdict["end"] is not None:
                     absolute_start=point+verdict["start"]
                     absolute_end=point+verdict["end"]
-                    if absolute_end-absolute_start <= max_seconds and absolute_end <= total+0.5:
+                    if end <= stop-point and absolute_end-absolute_start <= max_seconds and absolute_end <= total+0.5:
                         reviewed.append((verdict["score"],absolute_start,absolute_end,verdict["notes"]))
                         print(f"Recitation review {i+1}: score={verdict['score']:.1f}/10 | {verdict['notes']}")
                     else: print(f"Recitation review {i+1}: proposed range is outside limits.")
