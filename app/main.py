@@ -2,6 +2,7 @@ import os, json, random, hashlib, subprocess, time, tempfile, shutil
 from pathlib import Path
 import requests
 from PIL import Image, ImageDraw, ImageFont
+from quran_pipeline import identify_and_verify_verses, semantic_visual_queries, write_ayah_subtitles
 
 ROOT=Path(__file__).resolve().parents[1]
 CFG=json.loads((ROOT/"config/sources.json").read_text(encoding="utf-8"))
@@ -61,32 +62,26 @@ def cookie_args():
     return ["--cookies",str(c)] if c else []
 
 def discover_recitation(used_ids):
-    queries=[("yasser_al_dosari","ياسر الدوسري قرآن آيات قصيرة"),("abdulrahman_al_mossad","عبدالرحمن مسعد قرآن آيات قصيرة")]
     candidates=[]
-    for rid,query in queries:
+    for rec in CFG["reciters"]:
+        if not rec.get("enabled",True): continue
+        rid=rec["id"]; query=rec.get("search_query") or (rec["name_ar"]+" قرآن تلاوة قصيرة")
         try:
             p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch30:{query}"],capture_output=True,text=True,check=True,timeout=180)
             data=json.loads(p.stdout)
         except Exception as e:
             print(f"Search failed for {rid}: {e}"); continue
+        terms=[str(t).lower() for t in rec.get("title_terms",[])]
         for item in data.get("entries",[]):
             vid=item.get("id"); dur=item.get("duration"); title=item.get("title") or ""
             if not vid or vid in used_ids or not dur or float(dur)>int(CFG["publish"].get("max_seconds",58)): continue
-            low=title.lower()
-            terms=["ياسر","الدوسري","yasser","dosari"] if rid=="yasser_al_dosari" else ["عبدالرحمن","مسعد","abdurrahman","abdulrahman","mossad"]
-            if not any(t in low for t in terms): continue
+            if terms and not any(t in title.lower() for t in terms): continue
             views=int(item.get("view_count") or 0)
-            if views<1000: continue
-            candidates.append({"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}","title":title,"views":views,"duration":float(dur),"reciter_id":rid})
-    if not candidates: raise RuntimeError("لم نعثر على مقاطع قصيرة مناسبة للقارئين. جرّب التشغيل لاحقاً.")
-    candidates.sort(key=lambda x:x["views"],reverse=True)
-    # Top results in random order first, then the rest, so a removed or blocked
-    # video simply moves on to the next candidate instead of ending the run.
-    top=candidates[:10]; random.shuffle(top)
-    ordered=top+candidates[10:]
-    names={x["id"]:x["name_ar"] for x in CFG["reciters"]}
-    for c in ordered: c["reciter"]=names[c["reciter_id"]]
-    return ordered
+            if views<500: continue
+            candidates.append({"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}","title":title,"views":views,"duration":float(dur),"reciter_id":rid,"reciter":rec["name_ar"]})
+    if not candidates: raise RuntimeError("لم نعثر على مقاطع قصيرة مناسبة للقراء المحددين.")
+    random.shuffle(candidates); candidates.sort(key=lambda x:x["views"],reverse=True)
+    return candidates
 
 def pick_and_download(used_ids, max_tries=8):
     tries=0
@@ -202,9 +197,9 @@ def video_height(p):
                       "-of","default=noprint_wrappers=1:nokey=1",str(p)],capture_output=True,text=True,check=True)
     return int(r.stdout.strip().splitlines()[0])
 
-def search_visual_candidates(v, used):
+def search_visual_candidates(v, used, semantic_queries=None):
     # Picture-only B-roll found directly on YouTube; its soundtrack is never used.
-    queries=list(v["queries"])
+    queries=list(semantic_queries or v["queries"])
     picked=random.sample(queries,k=min(int(v["queries_per_run"]),len(queries)))
     pool={}
     for q in picked:
@@ -252,12 +247,12 @@ def normalize_segment(src, offset, seg_len, out):
     sh(["ffmpeg","-y","-ss",f"{offset:.3f}","-i",str(src),"-t",f"{seg_len:.3f}","-vf",vf,
         "-an","-c:v","libx264","-preset","fast","-crf","15",str(out)])
 
-def build_scene_segments(dur, led, tmp):
+def build_scene_segments(dur, led, tmp, semantic_queries=None):
     v=visual_cfg(); c=float(v["crossfade_seconds"])
     n=int(min(int(v["max_segments"]),max(int(v["min_segments"]),round(dur/float(v["segment_seconds"])))))
     seg_len=(dur+(n-1)*c)/n+0.25
     used=set((led.get("scenes") or {}).keys())
-    cands=search_visual_candidates(v,used)
+    cands=search_visual_candidates(v,used,semantic_queries)
     if not cands: raise RuntimeError("No suitable YouTube visual footage found.")
     segs=[]; chosen=[]; attempts=0; max_attempts=n*int(v["max_attempt_factor"])
     for cand in cands:
@@ -298,7 +293,7 @@ def make_overlay(path,reciter,verse_label):
     d.text((540,CFG["visual_style"]["reciter_y"]),f"{reciter}  •  {verse_label}",font=sf,anchor="ma",fill=(245,235,205,235))
     img.save(path)
 
-def compose_video(audio,segs,overlay,out,dur,crossfade):
+def compose_video(audio,segs,overlay,out,dur,crossfade,subtitle_path=None):
     n=len(segs)
     cmd=["ffmpeg","-y"]
     for s in segs:
@@ -315,7 +310,11 @@ def compose_video(audio,segs,overlay,out,dur,crossfade):
     # Hold the last frame if the segments come up a little short of the audio.
     filters.append(f"{prev}tpad=stop_mode=clone:stop_duration=5[bgv]")
     filters.append(f"[{oi}:v]format=rgba[ov]")
-    filters.append("[bgv][ov]overlay=0:0:format=auto,format=yuv420p[v]")
+    filters.append("[bgv][ov]overlay=0:0:format=auto[basev]")
+    if subtitle_path:
+        filters.append(f"[basev]subtitles={subtitle_path}:fontsdir=/usr/share/fonts/truetype/noto,format=yuv420p[v]")
+    else:
+        filters.append("[basev]format=yuv420p[v]")
     cmd+=["-filter_complex",";".join(filters),"-map","[v]","-map",f"{ai}:a:0","-t",f"{dur:.3f}",
           "-r","30","-c:v","libx264","-preset","medium","-crf","18","-maxrate","9M","-bufsize","18M",
           "-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-movflags","+faststart",str(out)]
@@ -325,11 +324,16 @@ def make_video(audio,led,out,reciter,verse_label):
     v=visual_cfg(); dur=duration(audio)
     tmp=Path(tempfile.mkdtemp(prefix="quran_scenes_"))
     try:
-        segs,chosen=build_scene_segments(dur,led,tmp)
+        identified=identify_and_verify_verses(audio,dur,reciter)
+        visual_queries=semantic_visual_queries(identified)
+        verses=identified["verses"]
+        verse_label=f'{identified["surah_name"]} | الآيات {verses[0]["ayah"]}-{verses[-1]["ayah"]}'
+        subtitles=tmp/"ayahs.ass"; write_ayah_subtitles(identified,subtitles)
+        segs,chosen=build_scene_segments(dur,led,tmp,visual_queries)
         overlay=tmp/"overlay.png"; make_overlay(overlay,reciter,verse_label)
-        compose_video(audio,segs,overlay,out,dur,float(v["crossfade_seconds"]))
+        compose_video(audio,segs,overlay,out,dur,float(v["crossfade_seconds"]),str(subtitles))
         scenes=led.setdefault("scenes",{}); now=int(time.time())
-        for c in chosen: scenes[c["id"]]={"title":c["title"],"used_at":now}  # never reused
+        for c in chosen: scenes[c["id"]]={"title":c["title"],"used_at":now}
         return [c["id"] for c in chosen]
     finally:
         shutil.rmtree(tmp,ignore_errors=True)
