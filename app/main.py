@@ -137,7 +137,7 @@ def scene_has_branding(video_path):
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is required for the visual logo/watermark check.")
     total=duration(video_path)
-    timestamps=sorted(set(max(0.1,min(total-0.1,total*x)) for x in (0.08,0.25,0.50,0.75,0.92)))
+    timestamps=sorted(set(max(0.1,min(total-0.1,total*x)) for x in (0.05,0.15,0.25,0.35,0.45,0.55,0.65,0.75,0.85,0.95)))
     parts=[{"text":"Inspect these sampled frames from one video. Detect any visible company logo, brand mark, product logo, channel logo, watermark, or corporate emblem, including graphic symbols without readable text. Ignore natural shapes and ordinary scenery. Return only JSON: {\"has_branding\": true or false, \"evidence\": \"short description\"}. If uncertain, set has_branding to true."}]
     frame_files=[]
     try:
