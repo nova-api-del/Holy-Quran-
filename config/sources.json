@@ -4,7 +4,7 @@
       "id": "abdulbasit_abdulsamad",
       "name_ar": "عبدالباسط عبدالصمد",
       "enabled": true,
-      "search_query": "عبدالباسط عبدالصمد قرآن تلاوة قصيرة",
+      "search_query": "عبدالباسط عبدالصمد قرآن تلاوة كاملة",
       "title_terms": [
         "عبدالباسط",
         "عبد الباسط",
@@ -17,7 +17,7 @@
       "id": "ahmed_al_nufais",
       "name_ar": "أحمد النفيس",
       "enabled": true,
-      "search_query": "أحمد النفيس قرآن تلاوة قصيرة",
+      "search_query": "أحمد النفيس قرآن تلاوة كاملة",
       "title_terms": [
         "أحمد النفيس",
         "احمد النفيس",
@@ -30,7 +30,7 @@
       "id": "saud_al_shuraim",
       "name_ar": "سعود الشريم",
       "enabled": true,
-      "search_query": "سعود الشريم قرآن تلاوة قصيرة",
+      "search_query": "سعود الشريم قرآن تلاوة كاملة",
       "title_terms": [
         "سعود الشريم",
         "saud al shuraim",
@@ -43,7 +43,7 @@
       "id": "yasser_al_dosari",
       "name_ar": "ياسر الدوسري",
       "enabled": true,
-      "search_query": "ياسر الدوسري قرآن تلاوة قصيرة",
+      "search_query": "ياسر الدوسري قرآن تلاوة كاملة",
       "title_terms": [
         "ياسر",
         "الدوسري",
@@ -55,7 +55,7 @@
       "id": "abdulrahman_al_mossad",
       "name_ar": "عبدالرحمن مسعد",
       "enabled": true,
-      "search_query": "عبدالرحمن مسعد قرآن تلاوة قصيرة",
+      "search_query": "عبدالرحمن مسعد قرآن تلاوة كاملة",
       "title_terms": [
         "عبدالرحمن",
         "مسعد",
@@ -79,7 +79,7 @@
       "4k mosque architecture cinematic",
       "4k river valley aerial autumn"
     ],
-    "segment_seconds": 5,
+    "segment_seconds": 17.5,
     "min_segments": 4,
     "max_segments": 10,
     "crossfade_seconds": 0.5,
@@ -96,6 +96,8 @@
   "publish": {
     "youtube": true,
     "instagram": false,
-    "max_seconds": 58
+    "min_source_seconds": 90,
+    "min_verified_seconds": 45,
+    "max_seconds": 175
   }
 }
