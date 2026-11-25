@@ -66,7 +66,7 @@ def yt_download(url, out, audio=False):
     end=float(limit)
     out.unlink(missing_ok=True)
     sh(base+["--download-sections",f"*0-{end}","--force-keyframes-at-cuts",
-             "-f","bv*[height<=2160]+ba/b[height<=2160]","--merge-output-format","mp4",
+             "-f","bv*+ba/b","--merge-output-format","mp4",
              "-o",str(out),url])
 
 def video_metadata(url):
@@ -278,14 +278,16 @@ def scene_url(excluded_urls=None):
     # Search for beautiful, calm, cinematic backgrounds that suit Quran recitations.
     # Rotate landscapes so consecutive videos do not keep the same visual mood.
     queries=[
-        "cinematic 4K nature landscape drone footage mountains clouds golden hour",
-        "cinematic desert dunes sunrise sunset golden sunlight 4K footage",
-        "cinematic sun rays through clouds mountains valley 4K landscape",
-        "cinematic ocean waves coastline sunset aerial 4K footage",
-        "cinematic forest waterfall river mist morning light 4K footage",
-        "cinematic starry night sky milky way mountains 4K landscape",
-        "cinematic mosque architecture courtyard sunset 4K footage",
-        "cinematic green valleys hills flowers breeze aerial nature 4K"
+        "cinematic nature landscape drone footage mountains clouds golden hour",
+        "beautiful desert dunes sunrise sunset golden sunlight cinematic video",
+        "sun rays through clouds mountains valley peaceful cinematic scenery",
+        "ocean waves coastline sunset aerial cinematic nature video",
+        "forest waterfall river mist morning light cinematic scenery",
+        "starry night sky milky way mountains peaceful cinematic landscape",
+        "mosque architecture courtyard sunset peaceful cinematic footage",
+        "green valleys hills flowers breeze aerial nature cinematic video",
+        "beautiful peaceful nature scenery mountains rivers sunrise",
+        "cinematic landscape nature footage 1080p 4K"
     ]
     query=random.choice(queries)
     p=subprocess.run(
@@ -297,8 +299,7 @@ def scene_url(excluded_urls=None):
     candidates=[]
     for item in data.get("entries",[]):
         vid=item.get("id")
-        dur=item.get("duration")
-        if not vid or not dur: continue
+        if not vid: continue
         source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
         if source_url in excluded_urls: continue
         candidates.append({"url":source_url,"title":item.get("title") or "YouTube visual footage",
