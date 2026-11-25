@@ -233,11 +233,9 @@ def scene_url(excluded_urls=None):
     for item in data.get("entries",[]):
         vid=item.get("id")
         dur=item.get("duration")
-        title=(item.get("title") or "").lower()
-        if not vid or not dur or float(dur)<12: continue
-        if any(word in title for word in ["lyrics","music video","song","nasheed","recitation","quran","reaction","gameplay"]):
-            continue
+        if not vid or not dur: continue
         source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
+        if source_url in excluded_urls: continue
         try:
             full=video_metadata(source_url)
         except Exception as e:
