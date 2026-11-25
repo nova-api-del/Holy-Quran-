@@ -101,6 +101,7 @@ def _local_visual_queries(identified):
     # Deterministic offline fallback: map Quranic Arabic themes to matching
     # footage searches; no model/API call is needed for scene selection.
     text = " ".join(v.get("text", "") for v in identified.get("verses", []))
+    text = re.sub(r"[\u064B-\u065F\u0670\u06D6-\u06EDـ]", "", text)
     themes = [
         (("ماء", "الماء", "أنهار", "نهر", "بحر", "البحر", "مطر", "المطر", "غيث"), "clear water rivers waterfalls rain aerial nature footage"),
         (("سماء", "السماوات", "نجوم", "النجوم", "كواكب"), "dramatic sky stars galaxy clouds timelapse footage"),
