@@ -63,30 +63,50 @@ def cookie_args():
 
 def discover_recitation(used_ids):
     candidates=[]
-    min_seconds=int(CFG["publish"].get("min_source_seconds",90))
+    min_seconds=int(CFG["publish"].get("min_source_seconds",45))
     max_seconds=int(CFG["publish"].get("max_seconds",175))
     for rec in CFG["reciters"]:
         if not rec.get("enabled",True): continue
-        rid=rec["id"]; query=rec.get("search_query") or (rec["name_ar"]+" قرآن تلاوة كاملة")
-        try:
-            p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch40:{query}"],capture_output=True,text=True,check=True,timeout=180)
-            data=json.loads(p.stdout)
-        except Exception as e:
-            print(f"Search failed for {rid}: {e}"); continue
+        rid=rec["id"]; name=rec["name_ar"]
+        queries=[]
+        for q in (
+            rec.get("search_query"),
+            f"{name} تلاوة قرآنية 3 دقائق",
+            f"{name} تلاوة قصيرة دقيقتين",
+            f"{name} تلاوة خاشعة قرآن",
+        ):
+            if q and q not in queries: queries.append(q)
         terms=[str(t).lower() for t in rec.get("title_terms",[])]
-        for item in data.get("entries",[]):
-            vid=item.get("id"); dur=item.get("duration"); title=item.get("title") or ""
-            if not vid or vid in used_ids or not dur: continue
-            dur=float(dur)
-            if dur < min_seconds or dur > max_seconds: continue
-            if terms and not any(t in title.lower() for t in terms): continue
-            views=int(item.get("view_count") or 0)
-            if views<500: continue
-            candidates.append({"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}",
-                               "title":title,"views":views,"duration":dur,"reciter_id":rid,"reciter":rec["name_ar"]})
-    if not candidates: raise RuntimeError(f"لم نعثر على تلاوات كاملة بين {min_seconds} و{max_seconds} ثانية للقراء المحددين.")
-    random.shuffle(candidates)
-    candidates.sort(key=lambda x:(x["duration"]>=120,x["views"]),reverse=True)
+        seen_for_reciter=set()
+        for query in queries:
+            try:
+                p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch30:{query}"],
+                                 capture_output=True,text=True,check=True,timeout=180)
+                data=json.loads(p.stdout)
+            except Exception as e:
+                print(f"Search failed for {rid} / {query}: {e}"); continue
+            entries=data.get("entries") or []
+            accepted=0
+            for item in entries:
+                vid=item.get("id"); dur=item.get("duration")
+                title=item.get("title") or ""
+                channel=item.get("channel") or item.get("uploader") or ""
+                if not vid or vid in used_ids or vid in seen_for_reciter or not dur: continue
+                dur=float(dur)
+                if dur < min_seconds or dur > max_seconds: continue
+                searchable=(title+" "+channel).lower()
+                if terms and not any(t in searchable for t in terms): continue
+                seen_for_reciter.add(vid)
+                views=int(item.get("view_count") or 0)
+                candidates.append({"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}",
+                                   "title":title,"views":views,"duration":dur,"reciter_id":rid,"reciter":name})
+                accepted+=1
+            print(f"Recitation search {rid}: {len(entries)} results, {accepted} candidates in {min_seconds}-{max_seconds}s.")
+    if not candidates:
+        raise RuntimeError(f"لم نعثر على تلاوات بين {min_seconds} و{max_seconds} ثانية. راجعنا عدة صيغ بحث لكل قارئ.")
+    # Prefer a clip close to 2:30, then use views as a tie-breaker. Missing view counts
+    # never disqualify an otherwise valid recitation.
+    candidates.sort(key=lambda x:(abs(x["duration"]-150),-x["views"]))
     return candidates
 
 def pick_and_download(used_ids, max_tries=8):
