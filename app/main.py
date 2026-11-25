@@ -271,10 +271,20 @@ def search_visual_candidates(v, used, semantic_queries=None, min_duration=0):
     variants=int(v.get("search_variants_per_query",4))
     pool={}
     for base in base_queries:
+        # Keep the detailed Gemini prompt, but also search a compact set of
+        # scene-defining nouns/adjectives so YouTube can return footage whose
+        # titles use shorter wording (e.g. "desert dunes" or "sun rays clouds").
+        import re
+        ordered=[w for w in re.findall(r"[a-z0-9]+",str(base).lower())
+                 if len(w)>2 and w not in VISUAL_STOPWORDS]
+        compact=" ".join(dict.fromkeys(ordered[:6]))
         qset=[base]
+        if compact and compact.lower()!=str(base).lower():
+            qset.append(compact)
         for suffix in ("cinematic footage","nature documentary footage","4k cinematic video"):
             if len(qset)>=variants: break
-            qset.append(f"{base} {suffix}")
+            qset.append(f"{compact or base} {suffix}")
+        qset=qset[:max(1,variants)]
         for qrank,q in enumerate(qset):
             try:
                 p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",
@@ -290,6 +300,9 @@ def search_visual_candidates(v, used, semantic_queries=None, min_duration=0):
                 dur=float(dur)
                 if dur < float(min_duration): continue
                 relevance,matched=visual_relevance(base,title,channel)
+                compact_relevance,compact_matched=visual_relevance(compact,title,channel) if compact else (0.0,[])
+                if compact_relevance > relevance:
+                    relevance,matched=compact_relevance,compact_matched
                 if relevance < float(v.get("min_title_relevance",0.20)):
                     continue
                 views=int(item.get("view_count") or 0)
