@@ -291,11 +291,13 @@ def scene_url(excluded_urls=None):
     excluded_urls=excluded_urls or set()
     configured=[x for x in CFG.get("visual_sources",[]) if x.get("enabled") and x.get("url") and x.get("url") not in excluded_urls]
     if configured:
-        source=random.choice(configured)
-        return ("youtube",source["url"],{"title":source.get("title") or "YouTube visual footage",
-                                        "creator":source.get("creator") or "غير محدد",
-                                        "url":source["url"],
-                                        "license":"لم يتم التحقق من الترخيص"})
+        fresh_configured=[x for x in configured if x.get("url") not in excluded_urls]
+        if fresh_configured:
+            source=random.choice(fresh_configured)
+            return ("youtube",source["url"],{"title":source.get("title") or "YouTube visual footage",
+                                            "creator":source.get("creator") or "غير محدد",
+                                            "url":source["url"],
+                                            "license":"لم يتم التحقق من الترخيص"})
     queries=[
         "cinematic nature scenery 4k mountains clouds river",
         "peaceful ocean waves sunset cinematic 4k",
@@ -320,7 +322,17 @@ def scene_url(excluded_urls=None):
         candidates.append({"url":source_url,"title":item.get("title") or "YouTube visual footage",
                            "creator":item.get("channel") or item.get("uploader") or "غير محدد"})
     if not candidates:
-        raise RuntimeError("No visual footage candidates were found.")
+        # Reuse a previous scene only when no fresh visual candidate is available.
+        previous=[e for e in ledger().get("clips",{}).values() if e.get("scene_url")]
+        if previous:
+            fallback=random.choice(previous)
+            reused_url=fallback["scene_url"]
+            print("No new visual scenes found; reusing a previous scene as fallback.")
+            return ("youtube",reused_url,{"title":"مشهد سابق من فيديو منشور",
+                                          "creator":"مصدر مستخدم سابقاً",
+                                          "url":reused_url,
+                                          "license":"لم يتم التحقق من الترخيص"})
+        raise RuntimeError("No visual footage candidates were found and no previous scene is available.")
     chosen=random.choice(candidates[:min(15,len(candidates))])
     credit={"title":chosen["title"],"creator":chosen["creator"],"url":chosen["url"],
             "license":"لم يتم التحقق من الترخيص"}
@@ -456,9 +468,8 @@ def main():
     audio=WORK/(clip_key+".mp3")
     if not audio.exists(): download_complete_short(selected["url"],audio)
     out=WORK/(clip_key+".mp4")
-    previous_scenes=[e.get("scene_url") for e in clips.values() if e.get("scene_url")]
-    last_scene=previous_scenes[-1] if previous_scenes else None
-    scene=scene_url({last_scene} if last_scene else set())
+    previous_scenes={e.get("scene_url") for e in clips.values() if e.get("scene_url")}
+    scene=scene_url(previous_scenes)
     make_video(audio,scene,out,selected["reciter"],"تلاوة كاملة")
     public_url=cloudinary_upload(out) if instagram_on else None
     title=f"تلاوة قرآنية خاشعة | {selected['reciter']} #Shorts"
