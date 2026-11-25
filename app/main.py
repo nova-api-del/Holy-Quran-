@@ -256,8 +256,6 @@ def search_visual_candidates(v, used, semantic_queries=None, min_duration=0):
                 dur=float(dur)
                 if dur < float(min_duration): continue
                 low=title.lower()
-                # Exclude clearly unrelated formats, not ordinary footage length or quality.
-                if any(w in low for w in v.get("blocked_words",[])): continue
                 views=int(item.get("view_count") or 0)
                 pool[vid]={"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}",
                            "title":title,"duration":dur,"views":views,
