@@ -1,7 +1,7 @@
 import json, os
 from pathlib import Path
 import requests
-GEMINI_MODEL=os.getenv("GEMINI_MODEL","gemini-2.5-flash")
+GEMINI_MODEL=os.getenv("GEMINI_MODEL","gemini-3.8-flash")
 GEMINI_URL="https://generativelanguage.googleapis.com/v1beta/models/"+GEMINI_MODEL+":generateContent"
 QURAN_API="https://api.alquran.cloud/v1"
 def _gemini(prompt,audio_path=None):
