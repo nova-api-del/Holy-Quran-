@@ -3,6 +3,7 @@ name: Quran ASR Build Check
 on:
   push:
     branches:
+      - main
       - "feat/**"
     paths:
       - "app/**"
