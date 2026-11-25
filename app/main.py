@@ -116,10 +116,11 @@ def discover_recitation(used_ids):
                               "credit_url":full.get("webpage_url") or full.get("original_url") or source_url,
                               "credit_license":full.get("license") or full.get("license_name") or "Used with permission"})
     if not candidates: raise RuntimeError("لم نعثر على مقاطع قصيرة مناسبة للقارئين. جرّب التشغيل لاحقاً.")
-    candidates.sort(key=lambda x:x["views"],reverse=True)
-    selected=max(candidates,key=lambda x:x["views"])
+    # Popularity is not a selection criterion: either requested reciter is acceptable.
+    random.shuffle(candidates)
+    selected=candidates[0]
     selected["reciter"]=next(x["name_ar"] for x in CFG["reciters"] if x["id"]==selected["reciter_id"])
-    print(f"Selected {selected['title']} | views={selected['views']} | {selected['reciter']}")
+    print(f"Selected recitation source: {selected['title']} | reciter={selected['reciter']}")
     return selected
 
 def review_recitation_audio(audio_path):
@@ -180,7 +181,10 @@ def download_complete_short(url, audio_out):
                 if verdict["start"] is not None and verdict["end"] is not None:
                     absolute_start=point+verdict["start"]
                     absolute_end=point+verdict["end"]
-                    if end <= stop-point and absolute_end-absolute_start <= max_seconds and absolute_end <= total+0.5:
+                    if (0 <= verdict["start"] < verdict["end"] <= stop-point
+                            and absolute_start >= point-0.5
+                            and absolute_end-absolute_start <= max_seconds
+                            and absolute_end <= total+0.5):
                         reviewed.append((verdict["score"],absolute_start,absolute_end,verdict["notes"]))
                         print(f"Recitation review {i+1}: score={verdict['score']:.1f}/10 | {verdict['notes']}")
                     else: print(f"Recitation review {i+1}: proposed range is outside limits.")
@@ -190,12 +194,16 @@ def download_complete_short(url, audio_out):
             finally:
                 preview.unlink(missing_ok=True)
         if reviewed:
-            score,start,end,notes=max(reviewed,key=lambda x:x[0])
-            print(f"Best recitation performance selected: {start:.2f}-{end:.2f}s | {score:.1f}/10 | {notes}")
+            # Prefer the best performance score; if scores are effectively tied,
+            # randomize among verified complete-ayah segments only.
+            top=max(x[0] for x in reviewed)
+            finalists=[x for x in reviewed if x[0] >= top-0.25]
+            score,start,end,notes=random.choice(finalists)
+            print(f"Complete-ayah recitation selected: {start:.2f}-{end:.2f}s | score={score:.1f}/10 | {notes}")
         else:
-            # Safe fallback: random complete source only when its full duration fits.
-            # Never publish an arbitrary 58s cut that may split an ayah.
-            raise RuntimeError("تعذر التأكد من حدود آيات مكتملة في المقاطع. أوقف النشر حتى لا تُقطع آية؛ جرّب مصدراً قصيراً كاملاً أو أعد التشغيل.")
+            # No arbitrary 58-second crop: without verified ayah boundaries we cannot
+            # guarantee the recitation will not be cut mid-ayah.
+            raise RuntimeError("لم أتمكن من تحديد حدود آيات مكتملة بثقة. لم أنشر مقطعاً عشوائياً حتى لا تُقطع آية؛ أعد التشغيل لاختيار تسجيل آخر للقارئ نفسه أو القارئ الآخر.")
     audio_out.unlink(missing_ok=True)
     sh(base+["--download-sections",f"*{start}-{end}","-f","bestaudio/best",
          "-x","--audio-format","mp3","--force-overwrites","-o",str(audio_out),url])
