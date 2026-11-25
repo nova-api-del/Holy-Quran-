@@ -88,7 +88,7 @@ jobs:
           grep -qxF '*.cookies.txt' .gitignore || printf '%s\n' '*.cookies.txt' >> .gitignore
           # Ignore generated media; GitHub rejects individual files over 100 MB.
           for pattern in 'work/*.mp4' 'work/*.mp3' 'work/*.webm' 'work/*.mkv' 'work/*.mov' 'work/scene.*' 'work/*.compressed.mp4'; do
-            grep -qxF "$pattern" .gitignore || printf '%s\\n' "$pattern" >> .gitignore
+            grep -qxF "$pattern" .gitignore || printf '%s\n' "$pattern" >> .gitignore
           done
           git add .gitignore
           # Persist only small state/diagnostic files, never video or audio assets.
