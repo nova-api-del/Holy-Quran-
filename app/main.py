@@ -1,4 +1,4 @@
-import os, json, random, hashlib, subprocess, time, base64
+import os, json, random, hashlib, subprocess, time, base64, uuid
 from pathlib import Path
 import requests
 from PIL import Image, ImageDraw, ImageFont, ImageStat
@@ -97,7 +97,7 @@ def discover_recitation(used_ids):
             print(f"Search failed for {rid}: {e}"); continue
         for item in data.get("entries",[]):
             vid=item.get("id"); dur=item.get("duration"); title=item.get("title") or ""
-            if not vid or vid in used_ids or not dur: continue  # Long source videos are allowed; only the extracted clip is capped.
+            if not vid or not dur: continue  # Repeated recitations are allowed; only the extracted clip is capped.
             low=title.lower()
             terms=["ياسر","الدوسري","yasser","dosari"] if rid=="yasser_al_dosari" else ["عبدالرحمن","مسعد","abdurrahman","abdulrahman","mossad"]
             if not any(t in low for t in terms): continue
@@ -449,13 +449,16 @@ def main():
         ig_done=(not instagram_on) or bool(entry.get("instagram_id"))
         if entry.get("video_url") and not (yt_done and ig_done):
             publish_pending_clip(entry,led,WORK/(clip_key+".mp4")); return
-    used_ids={e.get("source_video_id") for e in clips.values() if e.get("source_video_id")}
-    selected=discover_recitation(used_ids)
-    clip_key=hashlib.sha256(selected["id"].encode()).hexdigest()[:12]
+    # Reuse of a recitation is allowed. Give every generated video its own key
+    # so the ledger/cache never blocks a previously published source recording.
+    selected=discover_recitation(set())
+    clip_key=uuid.uuid4().hex[:12]
     audio=WORK/(clip_key+".mp3")
     if not audio.exists(): download_complete_short(selected["url"],audio)
     out=WORK/(clip_key+".mp4")
-    scene=scene_url()
+    previous_scenes=[e.get("scene_url") for e in clips.values() if e.get("scene_url")]
+    last_scene=previous_scenes[-1] if previous_scenes else None
+    scene=scene_url({last_scene} if last_scene else set())
     make_video(audio,scene,out,selected["reciter"],"تلاوة كاملة")
     public_url=cloudinary_upload(out) if instagram_on else None
     title=f"تلاوة قرآنية خاشعة | {selected['reciter']} #Shorts"
@@ -468,7 +471,7 @@ def main():
              f"{audio_credit}\n\n{visual_credit}\n"
              "التعديلات: استخراج الصوت، قصّ المشاهد ودمجها مع التلاوة والنص.")
     entry={"source_video_id":selected["id"],"source_title":selected["title"],"source_views":selected["views"],
-           "reciter":selected["reciter"],"title":title,"caption":caption,"video_url":public_url,
+           "reciter":selected["reciter"],"title":title,"caption":caption,"video_url":public_url,"scene_url":scene[1],
            "youtube_id":None,"instagram_id":None,"created_at":int(time.time())}
     clips[clip_key]=entry; save_ledger(led)
     publish_pending_clip(entry,led,out)
