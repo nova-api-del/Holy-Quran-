@@ -97,19 +97,18 @@ def discover_recitation(used_ids):
             if not any(t in low for t in terms): continue
             views=int(item.get("view_count") or 0)  # No minimum-view threshold.
             source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
+            # The user confirms they have direct permission to publish these reciters' recordings.
+            # Do not require YouTube CC BY metadata for recitation audio.
             try:
                 full=video_metadata(source_url)
             except Exception as e:
-                print(f"Skipping recitation with unverifiable license {vid}: {e}")
-                continue
-            if not has_reusable_license(full):
-                print(f"Skipping recitation without an explicit reusable CC BY license: {vid}")
-                continue
+                print(f"Metadata unavailable for permitted recitation {vid}; using search details: {e}")
+                full={}
             candidates.append({"id":vid,"url":source_url,"title":title,"views":views,"duration":float(dur),"reciter_id":rid,
                               "credit_title":full.get("title") or title,
-                              "credit_creator":full.get("uploader") or full.get("channel") or full.get("creator"),
+                              "credit_creator":full.get("uploader") or full.get("channel") or rid,
                               "credit_url":full.get("webpage_url") or full.get("original_url") or source_url,
-                              "credit_license":full.get("license") or full.get("license_name") or "Creative Commons Attribution"})
+                              "credit_license":full.get("license") or full.get("license_name") or "Used with permission"})
     if not candidates: raise RuntimeError("لم نعثر على مقاطع قصيرة مناسبة للقارئين. جرّب التشغيل لاحقاً.")
     candidates.sort(key=lambda x:x["views"],reverse=True)
     selected=random.choice(candidates[:min(10,len(candidates))])
