@@ -96,7 +96,7 @@
   "publish": {
     "youtube": true,
     "instagram": false,
-    "min_source_seconds": 90,
+    "min_source_seconds": 45,
     "min_verified_seconds": 45,
     "max_seconds": 175
   }
