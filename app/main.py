@@ -52,13 +52,16 @@ def yt_cookie_file():
     p=WORK/"youtube_cookies.txt"; p.write_text(raw, encoding="utf-8"); return p
 
 def yt_download(url, out, audio=False):
-    cmd=YTDLP+["--no-playlist","--retries","3","--fragment-retries","3"]
+    cmd=YTDLP+["--no-playlist","--socket-timeout","30","--retries","10",
+               "--fragment-retries","10","--extractor-retries","5","--concurrent-fragments","8"]
     c=yt_cookie_file()
     if c: cmd += ["--cookies",str(c)]
     if audio:
         cmd += ["-f","bestaudio/best","-x","--audio-format","mp3","-o",str(out)]
     else:
-        cmd += ["-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4","-o",str(out)]
+        limit=int(CFG["publish"].get("max_seconds",58))
+        cmd += ["--download-sections",f"*0-{limit}","--force-keyframes-at-cuts",
+                "-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4","-o",str(out)]
     cmd += [url]
     sh(cmd)
 
@@ -118,7 +121,10 @@ def discover_recitation(used_ids):
 
 def download_complete_short(url, video_out, audio_out):
     max_seconds=int(CFG["publish"].get("max_seconds",58))
-    cmd=YTDLP+["--no-playlist","--retries","3","--fragment-retries","3","--download-sections",f"*0-{max_seconds}","--force-keyframes-at-cuts","-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4","-o",str(video_out),url]
+    cmd=YTDLP+["--no-playlist","--socket-timeout","30","--retries","10","--fragment-retries","10",
+               "--extractor-retries","5","--concurrent-fragments","8","--download-sections",f"*0-{max_seconds}",
+               "--force-keyframes-at-cuts","-f","bv*[height<=1080]+ba/b[height<=1080]",
+               "--merge-output-format","mp4","-o",str(video_out),url]
     cookies=yt_cookie_file()
     if cookies: cmd[1:1]=["--cookies",str(cookies)]
     sh(cmd)
@@ -202,20 +208,16 @@ def extract_audio(source_audio, start_ms, end_ms, out):
         "-t",f"{(end_ms-start_ms)/1000:.3f}","-vn","-c:a","libmp3lame","-q:a","2",str(out)])
 
 def scene_url(excluded_urls=None):
-    # Discover atmospheric B-roll directly on YouTube. The source video's
-    # soundtrack is never used; only its picture is layered under the recitation.
+    # Visual footage is selected without requiring YouTube license metadata.
+    # Logo/watermark screening remains mandatory before a scene is used.
     excluded_urls=excluded_urls or set()
     configured=[x for x in CFG.get("visual_sources",[]) if x.get("enabled") and x.get("url") and x.get("url") not in excluded_urls]
-    for source in configured:
-        try:
-            meta=video_metadata(source["url"])
-            if has_reusable_license(meta):
-                return ("youtube",source["url"],{"title":meta.get("title"),"creator":meta.get("uploader") or meta.get("channel") or meta.get("creator"),
-                                                "url":meta.get("webpage_url") or meta.get("original_url") or source["url"],
-                                                "license":meta.get("license") or meta.get("license_name") or "Creative Commons Attribution"})
-            print("Skipping configured visual source without a reusable CC BY license.")
-        except Exception as e:
-            print(f"Skipping configured visual source with unverifiable license: {e}")
+    if configured:
+        source=random.choice(configured)
+        return ("youtube",source["url"],{"title":source.get("title") or "YouTube visual footage",
+                                        "creator":source.get("creator") or "غير محدد",
+                                        "url":source["url"],
+                                        "license":"لم يتم التحقق من الترخيص"})
     queries=[
         "cinematic nature scenery 4k mountains clouds river",
         "peaceful ocean waves sunset cinematic 4k",
@@ -224,14 +226,12 @@ def scene_url(excluded_urls=None):
         "mosque architecture peaceful cinematic footage"
     ]
     query=random.choice(queries)
-    try:
-        p=subprocess.run(
-            YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch20:{query}"],
-            capture_output=True,text=True,check=True,timeout=180
-        )
-        data=json.loads(p.stdout)
-    except Exception as e:
-        raise RuntimeError(f"YouTube visual search failed: {e}")
+    p=subprocess.run(
+        YTDLP+["--flat-playlist","--dump-single-json","--socket-timeout","30",
+               "--retries","5","--extractor-retries","5",f"ytsearch30:{query}"],
+        capture_output=True,text=True,check=True,timeout=180
+    )
+    data=json.loads(p.stdout)
     candidates=[]
     for item in data.get("entries",[]):
         vid=item.get("id")
@@ -239,22 +239,14 @@ def scene_url(excluded_urls=None):
         if not vid or not dur: continue
         source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
         if source_url in excluded_urls: continue
-        try:
-            full=video_metadata(source_url)
-        except Exception as e:
-            print(f"Skipping visual source with unverifiable license {vid}: {e}")
-            continue
-        if not has_reusable_license(full):
-            print(f"Skipping visual source without an explicit reusable CC BY license: {vid}")
-            continue
-        item["_credit"]={"title":full.get("title"),"creator":full.get("uploader") or full.get("channel") or full.get("creator"),
-                         "url":full.get("webpage_url") or full.get("original_url") or source_url,
-                         "license":full.get("license") or full.get("license_name") or "Creative Commons Attribution"}
-        candidates.append(item)
+        candidates.append({"url":source_url,"title":item.get("title") or "YouTube visual footage",
+                           "creator":item.get("channel") or item.get("uploader") or "غير محدد"})
     if not candidates:
         raise RuntimeError("No visual footage candidates were found.")
-    chosen=random.choice(candidates[:15])
-    return ("youtube",chosen.get("url") or f"https://www.youtube.com/watch?v={chosen['id']}",chosen["_credit"])
+    chosen=random.choice(candidates[:min(15,len(candidates))])
+    credit={"title":chosen["title"],"creator":chosen["creator"],"url":chosen["url"],
+            "license":"لم يتم التحقق من الترخيص"}
+    return ("youtube",chosen["url"],credit)
 
 def font_path():
     for p in ["/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf","/usr/share/fonts/opentype/noto/NotoNaskhArabic-Regular.ttf"]:
@@ -263,16 +255,13 @@ def font_path():
 
 def make_video(audio,scene,out,reciter,verse_label):
     scene_path=WORK/"scene.mp4"
-    if scene[0]=="youtube": yt_download(scene[1],scene_path,audio=False)
+    if scene[0]=="youtube":
+        yt_download(scene[1],scene_path,audio=False)
     else:
-        r=requests.get(scene[1],timeout=120); r.raise_for_status(); scene_path.write_bytes(r.content)
+        r=requests.get(scene[1],timeout=(15,120)); r.raise_for_status(); scene_path.write_bytes(r.content)
     if scene_has_branding(scene_path):
         raise SceneRejected("Scene rejected because a company logo, brand mark, or watermark was detected.")
     dur=duration(audio)
-    bg=WORK/"bg.mp4"
-    sh(["ffmpeg","-y","-stream_loop","-1","-i",str(scene_path),"-t",f"{dur:.3f}",
-      "-vf","scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,eq=brightness=-0.10:saturation=0.80",
-      "-an","-c:v","libx264","-preset","veryfast","-crf","20",str(bg)])
     img=Image.new("RGBA",(1080,1920),(0,0,0,0)); d=ImageDraw.Draw(img)
     f=ImageFont.truetype(font_path(),CFG["visual_style"]["font_size"])
     text="القرآن الكريم"; b=d.textbbox((0,0),text,font=f); x=(1080-(b[2]-b[0]))//2; y=CFG["visual_style"]["subtitle_y"]
@@ -281,10 +270,13 @@ def make_video(audio,scene,out,reciter,verse_label):
     sf=ImageFont.truetype(font_path(),30)
     d.text((540,CFG["visual_style"]["reciter_y"]),f"{reciter}  •  {verse_label}",font=sf,anchor="ma",fill=(245,235,205,235))
     overlay=WORK/"overlay.png"; img.save(overlay)
-    sh(["ffmpeg","-y","-i",str(bg),"-i",str(audio),"-loop","1","-i",str(overlay),
-      "-filter_complex","[2:v]format=rgba[ov];[0:v][ov]overlay=0:0:format=auto[v]",
-      "-map","[v]","-map","1:a:0","-t",f"{dur:.3f}","-c:v","libx264","-preset","veryfast","-crf","19",
-      "-c:a","aac","-b:a","192k","-shortest","-movflags","+faststart",str(out)])
+    # One video encode only: scale/crop, darken, overlay text, and mux recitation.
+    sh(["ffmpeg","-y","-threads","2","-stream_loop","-1","-i",str(scene_path),"-i",str(audio),
+        "-loop","1","-i",str(overlay),
+        "-filter_complex",
+        "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,eq=brightness=-0.10:saturation=0.80[bg];[2:v]format=rgba[ov];[bg][ov]overlay=0:0:format=auto[v]",
+        "-map","[v]","-map","1:a:0","-t",f"{dur:.3f}","-c:v","libx264","-preset","veryfast",
+        "-crf","19","-threads","2","-c:a","aac","-b:a","192k","-shortest","-movflags","+faststart",str(out)])
 
 def cloudinary_upload(path):
     import cloudinary, cloudinary.uploader
@@ -402,7 +394,7 @@ def main():
     audio_credit=(f"الصوت: {selected['credit_title']} — {selected['credit_creator']}\n"
                   f"المصدر: {selected['credit_url']}\nالترخيص: {selected['credit_license']}")
     visual_credit=(f"المشاهد: {scene[2]['title']} — {scene[2]['creator']}\n"
-                   f"المصدر: {scene[2]['url']}\nالترخيص: {scene[2]['license']}")
+                   f"المصدر: {scene[2]['url']}\nحالة الترخيص: {scene[2]['license']}")
     caption=(f"تلاوة قرآنية بصوت {selected['reciter']}\nاللهم اجعل القرآن ربيع قلوبنا.\n"
              "#القرآن #قرآن #تلاوة #ياسر_الدوسري #عبدالرحمن_مسعد #quran #shorts\n\n"
              f"{audio_credit}\n\n{visual_credit}\n"
