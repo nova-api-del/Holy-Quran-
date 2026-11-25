@@ -278,7 +278,7 @@ def search_visual_candidates(v, used, semantic_queries=None, min_duration=0):
                            "title":title,"duration":dur,"views":views,
                            "hinted":any(h in low for h in QUALITY_HINTS),"query_rank":qrank}
     cands=list(pool.values())
-    cands.sort(key=lambda c:(c["query_rank"],not c["hinted"],-c["views"]))
+    cands.sort(key=lambda c:(not c["hinted"],-c["views"],c["query_rank"]))
     print(f"Visual candidates: {len(cands)} from {len(base_queries)*variants} searches (all available resolutions)")
     return cands
 
