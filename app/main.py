@@ -203,17 +203,18 @@ VISUAL_DEFAULTS={
         "tutorial","review","vlog","news","tiktok","shorts",
         "girl","woman","women","model","dance","bikini","wedding","people","crowd"
     ],
-    "min_source_seconds":40,
-    "max_source_seconds":3600,
+    "min_source_seconds":0,
+    "max_source_seconds":999999,
     "segment_seconds":5.0,
-    "min_segments":4,
+    "min_segments":1,
     "max_segments":10,
     "crossfade_seconds":0.5,
-    "min_height":1080,
-    "preferred_height":1440,
+    "min_height":0,
+    "preferred_height":0,
     "queries_per_run":5,
-    "results_per_query":25,
-    "max_attempt_factor":3
+    "results_per_query":50,
+    "search_variants_per_query":4,
+    "max_attempt_factor":8
 }
 QUALITY_HINTS=("4k","uhd","2160","8k","5k","hdr")
 
@@ -221,43 +222,47 @@ def visual_cfg():
     v=dict(VISUAL_DEFAULTS); v.update(CFG.get("visuals") or {}); return v
 
 def segment_format(v):
-    # Prefer 1440p-2160p so the 9:16 centre crop is downscaled (sharp) rather than
-    # upscaled; fall back to 1080p+. AV1 is skipped for decoder compatibility.
-    lo=int(v["min_height"]); pref=int(v["preferred_height"])
-    return (f"bv*[height>={pref}][height<=2160][vcodec!^=av01]/"
-            f"bv*[height>={lo}][height<=2160][vcodec!^=av01]")
+    # Use the best stream YouTube offers, without imposing a resolution ceiling
+    # or excluding codecs/resolutions. FFmpeg normalizes the downloaded segment.
+    return "bv*+ba/b"
 
 def video_height(p):
     r=subprocess.run(["ffprobe","-v","error","-select_streams","v:0","-show_entries","stream=height",
                       "-of","default=noprint_wrappers=1:nokey=1",str(p)],capture_output=True,text=True,check=True)
     return int(r.stdout.strip().splitlines()[0])
 
-def search_visual_candidates(v, used, semantic_queries=None):
-    # Search each chronological ayah-group query separately so footage is not shuffled
-    # across unrelated meanings.
-    queries=list(semantic_queries or v["queries"])
+def search_visual_candidates(v, used, semantic_queries=None, min_duration=0):
+    # Search broadly for every ayah group: original semantic wording plus natural
+    # alternate phrasings. No source-resolution or maximum-duration restriction.
+    base_queries=list(semantic_queries or v["queries"])
+    variants=int(v.get("search_variants_per_query",4))
     pool={}
-    for q in queries:
-        try:
-            p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch{int(v['results_per_query'])}:{q}"],
-                             capture_output=True,text=True,check=True,timeout=180)
-            data=json.loads(p.stdout)
-        except Exception as e:
-            print(f"Visual search failed for '{q}': {e}"); continue
-        for item in data.get("entries") or []:
-            vid=item.get("id"); dur=item.get("duration"); title=item.get("title") or ""
-            if not vid or vid in used or vid in pool or not dur: continue
-            dur=float(dur)
-            if dur<float(v["min_source_seconds"]) or dur>float(v["max_source_seconds"]): continue
-            low=title.lower()
-            if any(w in low for w in v["blocked_words"]): continue
-            views=int(item.get("view_count") or 0)
-            pool[vid]={"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}",
-                       "title":title,"duration":dur,"views":views,
-                       "hinted":any(h in low for h in QUALITY_HINTS)}
+    for base in base_queries:
+        qset=[base]
+        for suffix in ("cinematic footage","nature documentary footage","4k cinematic video"):
+            if len(qset)>=variants: break
+            qset.append(f"{base} {suffix}")
+        for qrank,q in enumerate(qset):
+            try:
+                p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",
+                    f"ytsearch{int(v['results_per_query'])}:{q}"],
+                    capture_output=True,text=True,check=True,timeout=180)
+                data=json.loads(p.stdout)
+            except Exception as e:
+                print(f"Visual search failed for '{q}': {e}"); continue
+            for item in data.get("entries") or []:
+                vid=item.get("id"); dur=item.get("duration"); title=item.get("title") or ""
+                if not vid or vid in used or vid in pool or not dur: continue
+                dur=float(dur)
+                if dur < float(min_duration): continue
+                low=title.lower()
+                views=int(item.get("view_count") or 0)
+                pool[vid]={"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}",
+                           "title":title,"duration":dur,"views":views,
+                           "hinted":any(h in low for h in QUALITY_HINTS),"query_rank":qrank}
     cands=list(pool.values())
-    cands.sort(key=lambda c:(c["hinted"],c["views"]),reverse=True)
-    print(f"Visual candidates: {len(cands)} ({sum(c['hinted'] for c in cands)} advertise 4K/UHD)")
+    cands.sort(key=lambda c:(c["query_rank"],not c["hinted"],-c["views"]))
+    print(f"Visual candidates: {len(cands)} from {len(base_queries)*variants} searches (all available resolutions)")
     return cands
 
 def fetch_scene_segment(cand, seg_len, tmp, idx, v):
@@ -274,7 +279,6 @@ def fetch_scene_segment(cand, seg_len, tmp, idx, v):
     if not files: raise RuntimeError("section download produced no file")
     raw=files[0]
     h=video_height(raw)
-    if h<int(v["min_height"]): raise RuntimeError(f"source too small ({h}p)")
     return raw, start-s, h
 
 def normalize_segment(src, offset, seg_len, out):
@@ -294,7 +298,7 @@ def build_scene_segments(dur, led, tmp, semantic_queries=None):
     segs=[]; chosen=[]
     for idx in range(count):
         query=queries[min(idx,len(queries)-1)]
-        cands=search_visual_candidates(v,used,[query])
+        cands=search_visual_candidates(v,used,[query],min_duration=max(1.0,seg_len-2.0))
         accepted=False
         for cand in cands:
             try:
@@ -312,8 +316,8 @@ def build_scene_segments(dur, led, tmp, semantic_queries=None):
             break
         if not accepted:
             print(f"No matching high-resolution scene found for chronological group {idx+1}: {query}")
-    if len(segs)<int(v["min_segments"]):
-        raise RuntimeError(f"Only {len(segs)} relevant high-resolution scenes were found; refusing a low-quality or mismatched video.")
+    if not segs:
+        raise RuntimeError("No usable YouTube footage could be downloaded for any ayah scene after broad fallback searches.")
     return segs,chosen
 
 def font_path():

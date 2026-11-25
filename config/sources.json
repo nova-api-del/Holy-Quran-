@@ -80,7 +80,7 @@
       "4k river valley aerial autumn"
     ],
     "segment_seconds": 17.5,
-    "min_segments": 4,
+    "min_segments": 1,
     "max_segments": 10,
     "crossfade_seconds": 0.5,
     "min_height": 1080,
