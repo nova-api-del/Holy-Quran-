@@ -104,9 +104,19 @@ def discover_recitation(used_ids):
     return selected
 
 def review_recitation_audio(audio_path):
-    # Gemini ranks recitation performance and tajweed impression, not image quality.
+    # Try Gemini 3 models in order. If a model is unavailable, rate-limited,
+    # or returns an unusable response, automatically fall back to the next.
     api_key=os.environ.get("GEMINI_API_KEY")
     if not api_key: raise RuntimeError("GEMINI_API_KEY is required for recitation review.")
+    models=[
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3-flash-preview"
+    ]
     prompt=("استمع إلى هذا المقطع من تلاوة القرآن. قيّم جمال الأداء والخشوع وحسن التنغيم "
             "وسلامة النطق والتجويد المسموع بقدر ما تستطيع، ولا تخترع أخطاء تجويدية إن لم تكن متأكداً. "
             "الأهم اختيار الجزء الأكثر تأثيراً وجمالاً، وليس جودة التسجيل فقط. "
@@ -114,23 +124,34 @@ def review_recitation_audio(audio_path):
             "لبداية ونهاية مجموعة آيات مكتملة متتابعة داخل الملف، بحيث لا تتجاوز 58 ثانية "
             "ولا تقطع آية من بدايتها أو نهايتها، وnotes وصف عربي قصير. "
             "إذا لم تستطع تحديد حدود آيات مكتملة بثقة، اجعل start_seconds و end_seconds null.")
-    response=requests.post(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
-        params={"key":api_key},
-        json={"contents":[{"parts":[{"text":prompt},{"inline_data":{"mime_type":"audio/mpeg",
-              "data":base64.b64encode(audio_path.read_bytes()).decode("ascii")}}]}],
-              "generationConfig":{"temperature":0,"responseMimeType":"application/json"}},
-        timeout=180)
-    response.raise_for_status()
-    raw=response.json()["candidates"][0]["content"]["parts"][0]["text"]
-    result=json.loads(raw)
-    score=float(result.get("score",0))
-    start=result.get("start_seconds"); end=result.get("end_seconds")
-    if start is not None and end is not None:
-        start=float(start); end=float(end)
-        if start < 0 or end <= start or end-start > 58.5: start=end=None
-    else: start=end=None
-    return {"score":score,"start":start,"end":end,"notes":str(result.get("notes") or "")}
+    audio_data=base64.b64encode(audio_path.read_bytes()).decode("ascii")
+    last_error=None
+    for model in models:
+        try:
+            response=requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                params={"key":api_key},
+                json={"contents":[{"parts":[{"text":prompt},{"inline_data":{"mime_type":"audio/mpeg",
+                      "data":audio_data}}]}],
+                      "generationConfig":{"temperature":0,"responseMimeType":"application/json"}},
+                timeout=180)
+            response.raise_for_status()
+            payload=response.json()
+            raw=payload["candidates"][0]["content"]["parts"][0]["text"]
+            result=json.loads(raw)
+            score=float(result.get("score",0))
+            start=result.get("start_seconds"); end=result.get("end_seconds")
+            if start is not None and end is not None:
+                start=float(start); end=float(end)
+                if start < 0 or end <= start or end-start > 58.5: start=end=None
+            else: start=end=None
+            print(f"Recitation review model succeeded: {model}")
+            return {"score":score,"start":start,"end":end,"notes":str(result.get("notes") or "")}
+        except Exception as e:
+            last_error=e
+            status=getattr(getattr(e,"response",None),"status_code",None)
+            print(f"Gemini model {model} failed"+(f" (HTTP {status})" if status else "")+"; trying next model.")
+    raise RuntimeError(f"All Gemini 3 fallback models failed. Last error: {last_error}")
 
 def download_complete_short(url, audio_out, source_duration=None):
     max_seconds=min(58,int(CFG["publish"].get("max_seconds",58)))
