@@ -66,7 +66,7 @@ def yt_download(url, out, audio=False):
     end=float(limit)
     out.unlink(missing_ok=True)
     sh(base+["--download-sections",f"*0-{end}","--force-keyframes-at-cuts",
-             "-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4",
+             "-f","bv*[height<=2160]+ba/b[height<=2160]","--merge-output-format","mp4",
              "-o",str(out),url])
 
 def video_metadata(url):
@@ -275,12 +275,17 @@ def scene_url(excluded_urls=None):
             return ("youtube",source["url"],{"title":source.get("title") or "YouTube visual footage",
                                             "creator":source.get("creator") or "غير محدد",
                                             "url":source["url"]})
+    # Search for beautiful, calm, cinematic backgrounds that suit Quran recitations.
+    # Rotate landscapes so consecutive videos do not keep the same visual mood.
     queries=[
-        "cinematic nature scenery 4k mountains clouds river",
-        "peaceful ocean waves sunset cinematic 4k",
-        "beautiful forest waterfall nature cinematic footage",
-        "night sky stars clouds cinematic landscape",
-        "mosque architecture peaceful cinematic footage"
+        "cinematic 4K nature landscape drone footage mountains clouds golden hour",
+        "cinematic desert dunes sunrise sunset golden sunlight 4K footage",
+        "cinematic sun rays through clouds mountains valley 4K landscape",
+        "cinematic ocean waves coastline sunset aerial 4K footage",
+        "cinematic forest waterfall river mist morning light 4K footage",
+        "cinematic starry night sky milky way mountains 4K landscape",
+        "cinematic mosque architecture courtyard sunset 4K footage",
+        "cinematic green valleys hills flowers breeze aerial nature 4K"
     ]
     query=random.choice(queries)
     p=subprocess.run(
