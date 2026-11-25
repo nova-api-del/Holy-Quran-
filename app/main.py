@@ -252,7 +252,7 @@ VISUAL_STOPWORDS={
 
 def visual_terms(text):
     import re
-    words=re.findall(r"[a-z0-9]+|[\\u0600-\\u06ff]+",str(text).lower())
+    words=re.findall(r"[a-z0-9]+|[\u0600-\u06ff]+",str(text).lower())
     return {w for w in words if len(w)>2 and w not in VISUAL_STOPWORDS}
 
 def visual_relevance(query, title, channel=""):
@@ -290,7 +290,7 @@ def search_visual_candidates(v, used, semantic_queries=None, min_duration=0):
                 dur=float(dur)
                 if dur < float(min_duration): continue
                 relevance,matched=visual_relevance(base,title,channel)
-                if relevance < float(v.get("min_title_relevance",0.12)):
+                if relevance < float(v.get("min_title_relevance",0.20)):
                     continue
                 views=int(item.get("view_count") or 0)
                 candidate={"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}",
