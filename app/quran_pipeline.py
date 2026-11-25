@@ -141,8 +141,8 @@ def semantic_visual_queries(identified):
     for index, group in enumerate(groups, 1):
         if group:
             first, last = group[0]["ayah"], group[-1]["ayah"]
-            text = " ".join(v["text"] for v in group)
-            descriptions.append(f"Scene {index}, ayahs {first}-{last}: {text}")
+            group_text = " ".join(v["text"] for v in group)
+            descriptions.append(f"Scene {index}, ayahs {first}-{last}: {group_text}")
             local = _local_visual_queries({"verses": group})
             fallback.append(local[0] if local else "cinematic natural landscape matching the Quranic theme")
         else:
@@ -150,13 +150,13 @@ def semantic_visual_queries(identified):
             fallback.append("cinematic landscape, sky and light matching the nearby Quranic meaning")
 
     prompt = (
-        "Return JSON only in the form {\\"queries\\":[\\"English YouTube search query\\"]}. "
+        'Return JSON only in the form {"queries":["English YouTube search query"]}. '
         f"Return exactly {count} queries in chronological order. Each query must describe footage "
         "that directly illustrates the meaning of its own ayah group, not generic unrelated scenery. "
         "Use concrete visual subjects and actions when present (rain, rivers, mountains, night, dawn, "
         "gardens, ships, stars, wind, etc.). Be respectful: no depiction of Allah, prophets, angels, "
-        "religious figures, worshippers, faces, or text. Prefer cinematic 4K/8K landscape or nature footage.\\n"
-        + identified["surah_name"] + "\\n" + "\\n".join(descriptions)
+        "religious figures, worshippers, faces, or text. Prefer cinematic 4K/8K landscape or nature footage.\n"
+        + identified["surah_name"] + "\n" + "\n".join(descriptions)
     )
     try:
         response = _gemini(prompt)
