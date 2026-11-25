@@ -59,10 +59,11 @@ def yt_download(url, out, audio=False):
     if audio:
         sh(base+["-f","bestaudio/best","-x","--audio-format","mp3","-o",str(out),url])
         return
-    limit=int(CFG["publish"].get("max_seconds",58))
-    meta=video_metadata(url)
-    total=float(meta.get("duration") or limit)
-    end=min(total,float(limit))
+    # Avoid a separate metadata request: YouTube may reject it even when
+    # the actual media download is available. Download at most the configured
+    # clip length; yt-dlp naturally returns the full source if it is shorter.
+    limit=min(58,int(CFG["publish"].get("max_seconds",58)))
+    end=float(limit)
     out.unlink(missing_ok=True)
     sh(base+["--download-sections",f"*0-{end}","--force-keyframes-at-cuts",
              "-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4",
