@@ -97,7 +97,7 @@
     "youtube": true,
     "instagram": false,
     "min_source_seconds": 45,
-    "min_verified_seconds": 45,
+    "min_verified_seconds": 25,
     "max_seconds": 175
   }
 }
