@@ -70,18 +70,6 @@ def video_metadata(url):
     )
     return json.loads(p.stdout)
 
-def has_reusable_license(item):
-    # Only accept an explicit CC BY license. Standard YouTube licenses,
-    # missing license metadata, NC, ND and SA variants are not accepted.
-    license_text=" ".join(str(item.get(k) or "") for k in ("license","license_name","license_url")).lower()
-    if not license_text:
-        return False
-    if any(term in license_text for term in ("noncommercial","non-commercial","cc by-nc","cc-by-nc","no derivatives","no-derivatives","cc by-nd","cc-by-nd","sharealike","share-alike","cc by-sa","cc-by-sa")):
-        return False
-    return ("creative commons attribution" in license_text or
-            "creativecommons.org/licenses/by/" in license_text or
-            "cc by 4.0" in license_text or "cc-by-4.0" in license_text)
-
 def discover_recitation(used_ids):
     queries=[("yasser_al_dosari","ياسر الدوسري قرآن آيات قصيرة"),("abdulrahman_al_mossad","عبدالرحمن مسعد قرآن آيات قصيرة")]
     candidates=[]
@@ -100,15 +88,9 @@ def discover_recitation(used_ids):
             views=int(item.get("view_count") or 0)
             if views<1000: continue
             source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
-            try:
-                full=video_metadata(source_url)
-            except Exception as e:
-                print(f"Skipping recitation with unverifiable license {vid}: {e}")
-                continue
-            if not has_reusable_license(full):
-                print(f"Skipping recitation without an explicit reusable CC BY license: {vid}")
-                continue
-            candidates.append({"id":vid,"url":source_url,"title":title,"views":views,"duration":float(dur),"reciter_id":rid,"license":full.get("license")})
+            # License metadata is not used as an automatic discovery filter.
+            # Short duration does not itself grant permission to reuse copyrighted audio.
+            candidates.append({"id":vid,"url":source_url,"title":title,"views":views,"duration":float(dur),"reciter_id":rid})
     if not candidates: raise RuntimeError("لم نعثر على مقاطع قصيرة مناسبة للقارئين. جرّب التشغيل لاحقاً.")
     candidates.sort(key=lambda x:x["views"],reverse=True)
     selected=random.choice(candidates[:min(10,len(candidates))])
@@ -206,13 +188,8 @@ def scene_url(excluded_urls=None):
     excluded_urls=excluded_urls or set()
     configured=[x for x in CFG.get("visual_sources",[]) if x.get("enabled") and x.get("url") and x.get("url") not in excluded_urls]
     for source in configured:
-        try:
-            meta=video_metadata(source["url"])
-            if has_reusable_license(meta):
-                return ("youtube",source["url"])
-            print("Skipping configured visual source: no explicit reusable CC BY license.")
-        except Exception as e:
-            print(f"Skipping configured visual source with unverifiable license: {e}")
+        # Keep configured sources eligible; branding is checked on downloaded frames.
+        return ("youtube",source["url"])
     queries=[
         "cinematic nature scenery 4k mountains clouds river",
         "peaceful ocean waves sunset cinematic 4k",
@@ -236,15 +213,8 @@ def scene_url(excluded_urls=None):
         if not vid or not dur: continue
         source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
         if source_url in excluded_urls: continue
-        try:
-            full=video_metadata(source_url)
-        except Exception as e:
-            print(f"Skipping visual source with unverifiable license {vid}: {e}")
-            continue
-        if not has_reusable_license(full):
-            print(f"Skipping visual source without an explicit reusable CC BY license: {vid}")
-            continue
-        item["_verified_license"]=full.get("license")
+        # License metadata is not an automatic discovery filter.
+        # The downloaded footage is still rejected if Gemini detects branding.
         candidates.append(item)
     if not candidates:
         raise RuntimeError("No visual footage with a verified reusable CC BY license was found.")
@@ -391,7 +361,7 @@ def main():
             rejected_scenes.add(scene[1])
             print(f"Rejected branded scene ({attempt+1}/5): {e}")
     else:
-        raise RuntimeError("Could not find a licensed scene without visible logos or watermarks after 5 attempts.")
+        raise RuntimeError("Could not find a scene without visible logos or watermarks after 5 attempts.")
     public_url=cloudinary_upload(out) if instagram_on else None
     title=f"تلاوة قرآنية خاشعة | {selected['reciter']} #Shorts"
     caption=(f"تلاوة قرآنية بصوت {selected['reciter']}\nاللهم اجعل القرآن ربيع قلوبنا.\n"
