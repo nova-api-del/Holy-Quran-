@@ -480,7 +480,7 @@ def main():
     save_ledger(led)
     public_url=cloudinary_upload(out) if instagram_on else None
     title=(f"تلاوة سورة {clip_info['surah_name']} | الآيات "
-           f"{clip_info['first_ayah']}-{clip_info['last_ayah']} بصوت {selected['reciter']} #Shorts")
+           f"{clip_info['first_ayah']}-{clip_info['last_ayah']} بصوت {selected['reciter']} #Shorts")[:100]
     caption=(f"تلاوة قرآنية بصوت {selected['reciter']}\n"
              f"سورة {clip_info['surah_name']} | الآيات {clip_info['first_ayah']}-{clip_info['last_ayah']}\n"
              "اللهم اجعل القرآن ربيع قلوبنا.\n#القرآن #قرآن #تلاوة #quran #shorts")
