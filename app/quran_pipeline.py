@@ -76,8 +76,8 @@ def _gemini(prompt, audio_path=None):
     raise RuntimeError("All Gemini fallback models failed: " + " | ".join(failures[-8:]))
 
 def identify_and_verify_verses(audio_path, duration_seconds, reciter):
-    prompt = ("استمع إلى الملف الصوتي كاملاً وحدد الآيات القرآنية التي تُتلى كاملة من بدايتها إلى نهايتها. القارئ المتوقع: " + reciter + ".\\n"
-      +'أخرج JSON فقط بالشكل {"verses":[{"surah":1,"ayah":1,"start_seconds":0.0,"end_seconds":4.2}]}\\n'
+    prompt = ("استمع إلى الملف الصوتي كاملاً وحدد الآيات القرآنية التي تُتلى كاملة من بدايتها إلى نهايتها. القارئ المتوقع: " + reciter + ".\n"
+      +'أخرج JSON فقط بالشكل {"verses":[{"surah":1,"ayah":1,"start_seconds":0.0,"end_seconds":4.2}]}\n'
       +"لا تدرج آية يبدأ الصوت من وسطها أو ينتهي قبل اكتمالها. لا تخمّن. إذا لم تجزم فأرجع verses فارغة. كل عنصر آية واحدة، مع رقم السورة والآية وبداية ونهاية زمنيتين بالثواني. الآيات متتابعة من سورة واحدة. مدة الصوت "+str(duration_seconds)+" ثانية. لا تكتب نص القرآن؛ سيؤخذ من مصحف موثوق.")
     data = _gemini(prompt, audio_path)
     raw = data.get("verses")
@@ -137,8 +137,8 @@ def _local_visual_queries(identified):
     return queries[:10]
 
 def semantic_visual_queries(identified):
-    body = "\\n".join(str(v["ayah"]) + ". " + v["text"] for v in identified["verses"])
-    prompt = ("Understand these canonical Quran verses and return JSON only: {\"queries\":[\"English search query\"]}. Give 6-10 concise English YouTube searches for respectful cinematic footage directly reflecting their meaning: nature, sky, landscape, water, architecture, light. Avoid people, faces, religious depictions, text overlays, music videos and unrelated scenery.\\n" + identified["surah_name"] + "\\n" + body)
+    body = "\n".join(str(v["ayah"]) + ". " + v["text"] for v in identified["verses"])
+    prompt = ("Understand these canonical Quran verses and return JSON only: {\"queries\":[\"English search query\"]}. Give 6-10 concise English YouTube searches for respectful cinematic footage directly reflecting their meaning: nature, sky, landscape, water, architecture, light. Avoid people, faces, religious depictions, text overlays, music videos and unrelated scenery.\n" + identified["surah_name"] + "\n" + body)
     try:
         queries = _gemini(prompt).get("queries")
         if isinstance(queries, list):
@@ -173,6 +173,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     rows = []
     for verse in identified["verses"]:
-        text = verse["text"].replace("\\\\", r"\\\\").replace("{", r"\\{").replace("}", r"\\}")
+        text = verse["text"].replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
         rows.append("Dialogue: 0," + _ass_time(verse["start_seconds"]) + "," + _ass_time(verse["end_seconds"]) + ",Quran,,0,0,0,," + text)
-    Path(path).write_text(header + "\\n".join(rows) + "\\n", encoding="utf-8")
+    Path(path).write_text(header + "\n".join(rows) + "\n", encoding="utf-8")
