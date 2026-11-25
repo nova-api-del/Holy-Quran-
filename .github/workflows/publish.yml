@@ -3,6 +3,9 @@ on:
   push:
     paths:
       - requirements.txt
+      - app/**
+      - config/**
+      - .github/workflows/publish.yml
   workflow_dispatch:
   schedule:
     # 12:00 and 20:00 Iraq time (UTC+3)
