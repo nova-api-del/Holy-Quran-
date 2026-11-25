@@ -1,5 +1,5 @@
 {
-  "checked_at_utc": "2026-11-25T13:21:06.191063+00:00",
+  "checked_at_utc": "2026-11-25T13:26:59.957026+00:00",
   "check": "youtube_oauth_secret_fingerprint_diagnostics",
   "secrets": {
     "YOUTUBE_CLIENT_ID": {
