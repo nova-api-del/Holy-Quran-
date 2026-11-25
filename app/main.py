@@ -115,7 +115,7 @@ def review_recitation_audio(audio_path):
             "ولا تقطع آية من بدايتها أو نهايتها، وnotes وصف عربي قصير. "
             "إذا لم تستطع تحديد حدود آيات مكتملة بثقة، اجعل start_seconds و end_seconds null.")
     response=requests.post(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
         params={"key":api_key},
         json={"contents":[{"parts":[{"text":prompt},{"inline_data":{"mime_type":"audio/mpeg",
               "data":base64.b64encode(audio_path.read_bytes()).decode("ascii")}}]}],
@@ -210,7 +210,7 @@ def scene_has_branding(video_path):
                 raise RuntimeError("Could not extract frames for logo detection.")
             frame_files.append(frame)
             parts.append({"inline_data":{"mime_type":"image/jpeg","data":base64.b64encode(frame.read_bytes()).decode("ascii")}})
-        endpoint="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        endpoint="https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
         response=requests.post(endpoint,params={"key":api_key},json={
             "contents":[{"parts":parts}],
             "generationConfig":{"temperature":0,"responseMimeType":"application/json"}
