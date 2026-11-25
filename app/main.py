@@ -1,7 +1,7 @@
 import os, json, random, hashlib, subprocess, time, base64
 from pathlib import Path
 import requests
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageStat
 
 ROOT=Path(__file__).resolve().parents[1]
 CFG=json.loads((ROOT/"config/sources.json").read_text(encoding="utf-8"))
@@ -52,18 +52,58 @@ def yt_cookie_file():
     p=WORK/"youtube_cookies.txt"; p.write_text(raw, encoding="utf-8"); return p
 
 def yt_download(url, out, audio=False):
-    cmd=YTDLP+["--no-playlist","--socket-timeout","30","--retries","10",
-               "--fragment-retries","10","--extractor-retries","5","--concurrent-fragments","8"]
+    base=YTDLP+["--no-playlist","--socket-timeout","30","--retries","10",
+                "--fragment-retries","10","--extractor-retries","5","--concurrent-fragments","8"]
     c=yt_cookie_file()
-    if c: cmd += ["--cookies",str(c)]
+    if c: base += ["--cookies",str(c)]
     if audio:
-        cmd += ["-f","bestaudio/best","-x","--audio-format","mp3","-o",str(out)]
+        sh(base+["-f","bestaudio/best","-x","--audio-format","mp3","-o",str(out),url])
+        return
+
+    limit=int(CFG["publish"].get("max_seconds",58))
+    meta=video_metadata(url)
+    total=float(meta.get("duration") or 0)
+    max_start=max(0.0,total-limit)
+    if max_start <= 0:
+        start=0.0
     else:
-        limit=int(CFG["publish"].get("max_seconds",58))
-        cmd += ["--download-sections",f"*0-{limit}","--force-keyframes-at-cuts",
-                "-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4","-o",str(out)]
-    cmd += [url]
-    sh(cmd)
+        # Preview four short windows only, rank visual detail/contrast,
+        # then download the selected segment instead of the whole source.
+        sample_len=min(8.0,max(3.0,limit/6))
+        starts=sorted(set(round(max_start*x,2) for x in (0.08,0.34,0.62,0.88)))
+        ranked=[]
+        for i,point in enumerate(starts):
+            sample=WORK/f"scene_sample_{i}.mp4"
+            frame=WORK/f"scene_sample_{i}.jpg"
+            sample.unlink(missing_ok=True); frame.unlink(missing_ok=True)
+            end=min(total,point+sample_len)
+            cmd=base+["--download-sections",f"*{point}-{end}","--force-keyframes-at-cuts",
+                      "-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4",
+                      "-o",str(sample),url]
+            try:
+                sh(cmd)
+                subprocess.run(["ffmpeg","-y","-ss",f"{sample_len/2:.2f}","-i",str(sample),
+                                "-frames:v","1","-vf","scale=320:-2","-q:v","5",str(frame)],
+                               capture_output=True,check=True)
+                im=Image.open(frame).convert("L")
+                stats=ImageStat.Stat(im)
+                hist=im.histogram()
+                pixels=sum(hist) or 1
+                entropy=-sum((n/pixels)*__import__("math").log2(n/pixels) for n in hist if n)
+                score=entropy*0.7+stats.stddev[0]*0.3
+                ranked.append((score,point))
+                print(f"Scene preview {i+1}: start={point:.1f}s score={score:.2f}")
+            except Exception as e:
+                print(f"Scene preview {i+1} failed: {e}")
+            finally:
+                sample.unlink(missing_ok=True); frame.unlink(missing_ok=True)
+        start=max(ranked)[1] if ranked else 0.0
+        print(f"Selected visual segment start: {start:.2f}s of {total:.1f}s")
+    out.unlink(missing_ok=True)
+    end=min(total,start+limit) if total else start+limit
+    sh(base+["--download-sections",f"*{start}-{end}","--force-keyframes-at-cuts",
+             "-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4",
+             "-o",str(out),url])
 
 def video_metadata(url):
     p=subprocess.run(YTDLP+["--no-playlist","--skip-download","--dump-single-json",url],
