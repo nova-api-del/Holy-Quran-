@@ -1,7 +1,68 @@
 {
   "reciters": [
-    {"id":"yasser_al_dosari","name_ar":"ياسر الدوسري","enabled":true},
-    {"id":"abdulrahman_al_mossad","name_ar":"عبدالرحمن مسعد","enabled":true}
+    {
+      "id": "abdulbasit_abdulsamad",
+      "name_ar": "عبدالباسط عبدالصمد",
+      "enabled": true,
+      "search_query": "عبدالباسط عبدالصمد قرآن تلاوة قصيرة",
+      "title_terms": [
+        "عبدالباسط",
+        "عبد الباسط",
+        "abdulbasit",
+        "abdul bassit",
+        "abdulbaset"
+      ]
+    },
+    {
+      "id": "ahmed_al_nufais",
+      "name_ar": "أحمد النفيس",
+      "enabled": true,
+      "search_query": "أحمد النفيس قرآن تلاوة قصيرة",
+      "title_terms": [
+        "أحمد النفيس",
+        "احمد النفيس",
+        "ahmed al nufais",
+        "ahmed alnufais",
+        "al nufais"
+      ]
+    },
+    {
+      "id": "saud_al_shuraim",
+      "name_ar": "سعود الشريم",
+      "enabled": true,
+      "search_query": "سعود الشريم قرآن تلاوة قصيرة",
+      "title_terms": [
+        "سعود الشريم",
+        "saud al shuraim",
+        "al shuraim",
+        "alshuraim",
+        "shuraim"
+      ]
+    },
+    {
+      "id": "yasser_al_dosari",
+      "name_ar": "ياسر الدوسري",
+      "enabled": true,
+      "search_query": "ياسر الدوسري قرآن تلاوة قصيرة",
+      "title_terms": [
+        "ياسر",
+        "الدوسري",
+        "yasser",
+        "dosari"
+      ]
+    },
+    {
+      "id": "abdulrahman_al_mossad",
+      "name_ar": "عبدالرحمن مسعد",
+      "enabled": true,
+      "search_query": "عبدالرحمن مسعد قرآن تلاوة قصيرة",
+      "title_terms": [
+        "عبدالرحمن",
+        "مسعد",
+        "abdulrahman",
+        "mossad"
+      ]
+    }
   ],
   "visuals": {
     "queries": [
@@ -18,13 +79,23 @@
       "4k mosque architecture cinematic",
       "4k river valley aerial autumn"
     ],
-    "segment_seconds": 5.0,
+    "segment_seconds": 5,
     "min_segments": 4,
     "max_segments": 10,
     "crossfade_seconds": 0.5,
     "min_height": 1080,
     "preferred_height": 1440
   },
-  "visual_style":{"width":1080,"height":1920,"font_size":62,"subtitle_y":1450,"reciter_y":1610},
-  "publish":{"youtube":true,"instagram":true,"max_seconds":58}
+  "visual_style": {
+    "width": 1080,
+    "height": 1920,
+    "font_size": 62,
+    "subtitle_y": 1450,
+    "reciter_y": 1610
+  },
+  "publish": {
+    "youtube": true,
+    "instagram": false,
+    "max_seconds": 58
+  }
 }
