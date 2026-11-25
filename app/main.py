@@ -85,18 +85,17 @@ def discover_recitation(used_ids):
     candidates=[]
     for rid,query in queries:
         try:
-            p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch30:{query}"],capture_output=True,text=True,check=True,timeout=180)
+            p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch100:{query}"],capture_output=True,text=True,check=True,timeout=240)
             data=json.loads(p.stdout)
         except Exception as e:
             print(f"Search failed for {rid}: {e}"); continue
         for item in data.get("entries",[]):
             vid=item.get("id"); dur=item.get("duration"); title=item.get("title") or ""
-            if not vid or vid in used_ids or not dur or float(dur)>int(CFG["publish"].get("max_seconds",58)): continue
+            if not vid or vid in used_ids or not dur: continue  # Long source videos are allowed; only the extracted clip is capped.
             low=title.lower()
             terms=["ياسر","الدوسري","yasser","dosari"] if rid=="yasser_al_dosari" else ["عبدالرحمن","مسعد","abdurrahman","abdulrahman","mossad"]
             if not any(t in low for t in terms): continue
-            views=int(item.get("view_count") or 0)
-            if views<1000: continue
+            views=int(item.get("view_count") or 0)  # No minimum-view threshold.
             source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
             try:
                 full=video_metadata(source_url)
@@ -119,11 +118,12 @@ def discover_recitation(used_ids):
     return selected
 
 def download_complete_short(url, video_out, audio_out):
-    cmd=YTDLP+["--no-playlist","--retries","3","--fragment-retries","3","-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4","-o",str(video_out),url]
+    max_seconds=int(CFG["publish"].get("max_seconds",58))
+    cmd=YTDLP+["--no-playlist","--retries","3","--fragment-retries","3","--download-sections",f"*0-{max_seconds}","--force-keyframes-at-cuts","-f","bv*[height<=1080]+ba/b[height<=1080]","--merge-output-format","mp4","-o",str(video_out),url]
     cookies=yt_cookie_file()
     if cookies: cmd[1:1]=["--cookies",str(cookies)]
     sh(cmd)
-    sh(["ffmpeg","-y","-i",str(video_out),"-vn","-acodec","libmp3lame","-q:a","2",str(audio_out)])
+    sh(["ffmpeg","-y","-i",str(video_out),"-t",str(max_seconds),"-vn","-acodec","libmp3lame","-q:a","2",str(audio_out)])
 
 def duration(p):
     r=subprocess.run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(p)],capture_output=True,text=True,check=True)
