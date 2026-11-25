@@ -86,7 +86,12 @@ jobs:
           touch .gitignore
           grep -qxF 'work/youtube_cookies.txt' .gitignore || printf '%s\n' 'work/youtube_cookies.txt' >> .gitignore
           grep -qxF '*.cookies.txt' .gitignore || printf '%s\n' '*.cookies.txt' >> .gitignore
+          # Ignore generated media; GitHub rejects individual files over 100 MB.
+          for pattern in 'work/*.mp4' 'work/*.mp3' 'work/*.webm' 'work/*.mkv' 'work/*.mov' 'work/scene.*' 'work/*.compressed.mp4'; do
+            grep -qxF "$pattern" .gitignore || printf '%s\\n' "$pattern" >> .gitignore
+          done
           git add .gitignore
-          git add -A work/ 2>/dev/null || true
+          # Persist only small state/diagnostic files, never video or audio assets.
+          git add -A work/ledger.json work/diagnostics.json work/diagnostics.md 2>/dev/null || true
           git commit -m "chore: save workflow diagnostics and publication ledger" || true
           git push || true
