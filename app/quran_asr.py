@@ -181,6 +181,16 @@ def transcribe_and_match(audio_path, duration_seconds, reciter):
         for ayah in ayahs:
             surah = int(ayah["sura"])
             ayah_no = int(ayah["aya"])
+            # Identical ayah wording occurs in more than one place in the Mushaf.
+            # Without neighboring context, do not guess which location was recited.
+            key = (surah, ayah_no)
+            try:
+                quran_index = quran.keys.index(key)
+                if quran._ayahs.count(quran._ayahs[quran_index]) > 1:
+                    print(f"Skipping ambiguous repeated ayah {surah}:{ayah_no}; no context resolves its location.")
+                    continue
+            except (ValueError, AttributeError):
+                raise RuntimeError("Could not verify the ayah's unique Mushaf location.")
             indices = [
                 i for i, word in enumerate(target_words)
                 if int(word[0]) == surah and int(word[1]) == ayah_no
