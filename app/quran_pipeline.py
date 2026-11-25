@@ -16,17 +16,23 @@ if GEMINI_MODEL:
 QURAN_API = "https://api.alquran.cloud/v1"
 RETRYABLE = {408, 429, 500, 502, 503, 504}
 
-def _gemini(prompt, audio_path=None):
+def _gemini(prompt, audio_path=None, image_paths=None):
     key = os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
         raise RuntimeError("GEMINI_API_KEY is missing; refusing to publish without verified verse captions.")
     parts = [{"text": prompt}]
-    if audio_path:
+    if audio_path or image_paths:
         import base64
-        raw = Path(audio_path).read_bytes()
-        if len(raw) > 18 * 1024 * 1024:
-            raise RuntimeError("Audio is too large for inline Gemini analysis.")
-        parts.insert(0, {"inline_data": {"mime_type": "audio/mpeg", "data": base64.b64encode(raw).decode("ascii")}})
+        if audio_path:
+            raw = Path(audio_path).read_bytes()
+            if len(raw) > 18 * 1024 * 1024:
+                raise RuntimeError("Audio is too large for inline Gemini analysis.")
+            parts.insert(0, {"inline_data": {"mime_type": "audio/mpeg", "data": base64.b64encode(raw).decode("ascii")}})
+        for image_path in (image_paths or []):
+            raw = Path(image_path).read_bytes()
+            if len(raw) > 5 * 1024 * 1024:
+                raise RuntimeError("A sampled scene frame is too large for inline Gemini analysis.")
+            parts.append({"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(raw).decode("ascii")}})
 
     failures = []
     for model in GEMINI_MODELS:
@@ -74,6 +80,32 @@ def _gemini(prompt, audio_path=None):
                 failures.append(f"{model}: {type(exc).__name__}: {exc}")
                 break
     raise RuntimeError("All Gemini fallback models failed: " + " | ".join(failures[-8:]))
+
+def verify_visual_scene(query, image_paths):
+    """Score actual sampled video frames against the intended ayah scene query.
+
+    Returns None when Gemini is unavailable so metadata ranking remains a safe
+    fallback; a low score is an explicit visual mismatch, not an API failure.
+    """
+    if not os.getenv("GEMINI_API_KEY", "").strip():
+        print("Gemini vision key unavailable; retaining metadata-ranked scene fallback.")
+        return None
+    prompt = (
+        'Inspect the attached video frames as evidence of the actual footage. '
+        'Compare them to this intended scene: ' + str(query) + '. '
+        'Ignore the video title and search terms; judge only visible pixels. '
+        'Return JSON only: {"score":0.0,"matches":false,"reason":"short factual visual description"}. '
+        'Score from 0 to 1. Use 1 only for a clear visual match, 0 for unrelated footage. '
+        'A partial but relevant visual match should score around 0.5. Do not infer unseen content.'
+    )
+    result = _gemini(prompt, image_paths=image_paths)
+    try:
+        score = max(0.0, min(1.0, float(result.get("score", 0))))
+    except (TypeError, ValueError):
+        raise RuntimeError("Gemini vision returned an invalid scene score.")
+    matches = bool(result.get("matches", score >= 0.35))
+    return {"score": score, "matches": matches, "reason": str(result.get("reason", ""))[:240]}
+
 
 def identify_and_verify_verses(audio_path, duration_seconds, reciter):
     # Quran-specific ASR is the source of truth for verse identity. Gemini is not
