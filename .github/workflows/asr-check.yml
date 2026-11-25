@@ -1,0 +1,45 @@
+name: Quran ASR Build Check
+on:
+  push:
+    branches:
+      - "feat/**"
+    paths:
+      - "app/**"
+      - "requirements.txt"
+      - ".github/workflows/asr-check.yml"
+  pull_request:
+    paths:
+      - "app/**"
+      - "requirements.txt"
+      - ".github/workflows/asr-check.yml"
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project dependencies
+        run: pip install -r requirements.txt
+      - name: Check Python syntax and configuration
+        run: |
+          python -m py_compile app/main.py app/quran_pipeline.py app/quran_asr.py app/diagnostics.py
+          python -m json.tool config/sources.json > /dev/null
+      - name: Download and initialize Quran ASR model
+        run: |
+          python - <<'PY'
+          import sherpa_onnx
+          from quran_asr import _assets, _load_retriever, MODEL_DIR
+          model, tokens, retrieve = _assets()
+          module = _load_retriever(retrieve)
+          quran = module.Quran(cache=str(MODEL_DIR / "quran_uthmani_hafs.json"))
+          recognizer = sherpa_onnx.OfflineRecognizer.from_zipformer_ctc(
+              model=str(model), tokens=str(tokens), num_threads=2,
+              sample_rate=16000, feature_dim=80, decoding_method="greedy_search",
+              provider="cpu")
+          print("Quran ASR initialized; ayah word count:", len(quran.words))
+          PY
