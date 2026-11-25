@@ -186,7 +186,7 @@ def transcribe_and_match(audio_path, duration_seconds, reciter):
             key = (surah, ayah_no)
             try:
                 quran_index = quran.keys.index(key)
-                if quran._ayahs.count(quran._ayahs[quran_index]) > 1:
+                if len(ayahs) == 1 and quran._ayahs.count(quran._ayahs[quran_index]) > 1:
                     print(f"Skipping ambiguous repeated ayah {surah}:{ayah_no}; no context resolves its location.")
                     continue
             except (ValueError, AttributeError):
