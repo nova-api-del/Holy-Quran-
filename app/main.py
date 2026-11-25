@@ -63,24 +63,30 @@ def cookie_args():
 
 def discover_recitation(used_ids):
     candidates=[]
+    min_seconds=int(CFG["publish"].get("min_source_seconds",90))
+    max_seconds=int(CFG["publish"].get("max_seconds",175))
     for rec in CFG["reciters"]:
         if not rec.get("enabled",True): continue
-        rid=rec["id"]; query=rec.get("search_query") or (rec["name_ar"]+" قرآن تلاوة قصيرة")
+        rid=rec["id"]; query=rec.get("search_query") or (rec["name_ar"]+" قرآن تلاوة كاملة")
         try:
-            p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch30:{query}"],capture_output=True,text=True,check=True,timeout=180)
+            p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch40:{query}"],capture_output=True,text=True,check=True,timeout=180)
             data=json.loads(p.stdout)
         except Exception as e:
             print(f"Search failed for {rid}: {e}"); continue
         terms=[str(t).lower() for t in rec.get("title_terms",[])]
         for item in data.get("entries",[]):
             vid=item.get("id"); dur=item.get("duration"); title=item.get("title") or ""
-            if not vid or vid in used_ids or not dur or float(dur)>int(CFG["publish"].get("max_seconds",58)): continue
+            if not vid or vid in used_ids or not dur: continue
+            dur=float(dur)
+            if dur < min_seconds or dur > max_seconds: continue
             if terms and not any(t in title.lower() for t in terms): continue
             views=int(item.get("view_count") or 0)
             if views<500: continue
-            candidates.append({"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}","title":title,"views":views,"duration":float(dur),"reciter_id":rid,"reciter":rec["name_ar"]})
-    if not candidates: raise RuntimeError("لم نعثر على مقاطع قصيرة مناسبة للقراء المحددين.")
-    random.shuffle(candidates); candidates.sort(key=lambda x:x["views"],reverse=True)
+            candidates.append({"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}",
+                               "title":title,"views":views,"duration":dur,"reciter_id":rid,"reciter":rec["name_ar"]})
+    if not candidates: raise RuntimeError(f"لم نعثر على تلاوات كاملة بين {min_seconds} و{max_seconds} ثانية للقراء المحددين.")
+    random.shuffle(candidates)
+    candidates.sort(key=lambda x:(x["duration"]>=120,x["views"]),reverse=True)
     return candidates
 
 def pick_and_download(used_ids, max_tries=8):
@@ -114,34 +120,38 @@ def duration(p):
 def choose_complete_ayah_block(rec, used):
     verses=rec.get("verses") or []
     if not verses:
-        raise RuntimeError(f"No verified verse timestamps for {rec['name_ar']}; refusing to cut or publish.")
-    verses=sorted(verses,key=lambda v:(int(v["verse_key"].split(":")[0]),int(v["verse_key"].split(":")[1])))
-    chapter=int(verses[0]["verse_key"].split(":")[0])
+        raise RuntimeError(f"No verified verse timestamps for {rec['surah_name']}; refusing to cut or publish.")
+    verses=sorted(verses,key=lambda v:(int(v["surah"]),int(v["ayah"])))
+    chapter=int(verses[0]["surah"])
     for v in verses:
-        if int(v["verse_key"].split(":")[0]) != chapter:
+        if int(v["surah"]) != chapter:
             raise RuntimeError("A source entry cannot mix surahs.")
-        if int(v["start_ms"]) < 0 or int(v["end_ms"]) <= int(v["start_ms"]):
-            raise RuntimeError(f"Invalid timestamp range for {v['verse_key']}.")
-    max_ms=int(CFG["publish"]["max_seconds"]*1000)
+        if float(v["start_seconds"]) < 0 or float(v["end_seconds"]) <= float(v["start_seconds"]):
+            raise RuntimeError(f"Invalid timestamp range for {v['surah']}:{v['ayah']}.")
+    max_ms=int(CFG["publish"].get("max_seconds",175)*1000)
+    min_ms=int(CFG["publish"].get("min_verified_seconds",45)*1000)
     candidates=[]
     for i,first in enumerate(verses):
         block=[first]
         for nxt in verses[i+1:]:
-            expected=int(block[-1]["verse_key"].split(":")[1])+1
-            current=int(nxt["verse_key"].split(":")[1])
-            if current != expected: break
-            if int(nxt["end_ms"])-int(first["start_ms"]) > max_ms: break
+            expected=int(block[-1]["ayah"])+1
+            if int(nxt["ayah"]) != expected: break
+            if (float(nxt["end_seconds"])-float(first["start_seconds"]))*1000 > max_ms-600: break
             block.append(nxt)
-        # One long ayah is allowed in full; never trim it to fit a target duration.
-        key=",".join(v["verse_key"] for v in block)
-        if key not in used: candidates.append(block)
+        key=f"{chapter}:{block[0]['ayah']}-{chapter}:{block[-1]['ayah']}"
+        raw_start=float(block[0]["start_seconds"])
+        raw_end=float(block[-1]["end_seconds"])
+        if key not in used and (raw_end-raw_start)*1000 >= min_ms:
+            candidates.append((block,key,raw_start,raw_end))
     if not candidates:
-        raise RuntimeError("No unused complete consecutive ayah block is available.")
-    block=random.choice(candidates)
-    # Use the verified ayah boundaries exactly; padding can leak adjacent recitation.
-    start=int(block[0]["start_ms"])
-    end=int(block[-1]["end_ms"])
-    return block,start,end
+        raise RuntimeError("No unused consecutive complete-ayah block of at least 45 seconds fits the 175-second Shorts limit.")
+    block,key,raw_start,raw_end=max(candidates,key=lambda x:(x[3]-x[2],len(x[0])))
+    # Keep a tiny natural lead-in/tail while never cutting through an ayah.
+    start=max(0,int(raw_start*1000)-120)
+    end=int(raw_end*1000)+420
+    if end-start > max_ms:
+        raise RuntimeError("The complete ayah block plus natural audio tail exceeds the Shorts duration limit.")
+    return block,start,end,key
 
 def extract_audio(source_audio, start_ms, end_ms, out):
     if end_ms <= start_ms: raise RuntimeError("Invalid audio clip range.")
@@ -198,11 +208,11 @@ def video_height(p):
     return int(r.stdout.strip().splitlines()[0])
 
 def search_visual_candidates(v, used, semantic_queries=None):
-    # Picture-only B-roll found directly on YouTube; its soundtrack is never used.
+    # Search each chronological ayah-group query separately so footage is not shuffled
+    # across unrelated meanings.
     queries=list(semantic_queries or v["queries"])
-    picked=random.sample(queries,k=min(int(v["queries_per_run"]),len(queries)))
     pool={}
-    for q in picked:
+    for q in queries:
         try:
             p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch{int(v['results_per_query'])}:{q}"],
                              capture_output=True,text=True,check=True,timeout=180)
@@ -216,11 +226,12 @@ def search_visual_candidates(v, used, semantic_queries=None):
             if dur<float(v["min_source_seconds"]) or dur>float(v["max_source_seconds"]): continue
             low=title.lower()
             if any(w in low for w in v["blocked_words"]): continue
+            views=int(item.get("view_count") or 0)
             pool[vid]={"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}",
-                       "title":title,"duration":dur,"hinted":any(h in low for h in QUALITY_HINTS)}
+                       "title":title,"duration":dur,"views":views,
+                       "hinted":any(h in low for h in QUALITY_HINTS)}
     cands=list(pool.values())
-    random.shuffle(cands)
-    cands.sort(key=lambda c: not c["hinted"])  # titles that advertise 4K/UHD first
+    cands.sort(key=lambda c:(c["hinted"],c["views"]),reverse=True)
     print(f"Visual candidates: {len(cands)} ({sum(c['hinted'] for c in cands)} advertise 4K/UHD)")
     return cands
 
@@ -248,30 +259,37 @@ def normalize_segment(src, offset, seg_len, out):
         "-an","-c:v","libx264","-preset","fast","-crf","15",str(out)])
 
 def build_scene_segments(dur, led, tmp, semantic_queries=None):
-    v=visual_cfg(); c=float(v["crossfade_seconds"])
-    n=int(min(int(v["max_segments"]),max(int(v["min_segments"]),round(dur/float(v["segment_seconds"])))))
-    seg_len=(dur+(n-1)*c)/n+0.25
+    v=visual_cfg(); crossfade=float(v["crossfade_seconds"])
+    count=int(min(int(v["max_segments"]),max(int(v["min_segments"]),round(dur/float(v["segment_seconds"])))))
+    seg_len=(dur+(count-1)*crossfade)/count+0.25
     used=set((led.get("scenes") or {}).keys())
-    cands=search_visual_candidates(v,used,semantic_queries)
-    if not cands: raise RuntimeError("No suitable YouTube visual footage found.")
-    segs=[]; chosen=[]; attempts=0; max_attempts=n*int(v["max_attempt_factor"])
-    for cand in cands:
-        if len(segs)>=n or attempts>=max_attempts: break
-        attempts+=1
-        idx=len(segs)
-        try:
-            raw,offset,h=fetch_scene_segment(cand,seg_len,tmp,idx,v)
-            norm=tmp/f"seg{idx}.mp4"
-            normalize_segment(raw,offset,seg_len,norm)
-            raw.unlink(missing_ok=True)
-        except Exception as e:
-            print(f"Skipping scene {cand['id']}: {e}")
-            for f in tmp.glob(f"raw{idx}.*"): f.unlink(missing_ok=True)
-            continue
-        segs.append(norm); chosen.append(cand)
-        print(f"Scene {len(segs)}/{n}: {cand['title'][:60]} | {h}p")
-    if not segs: raise RuntimeError("Could not download any usable visual segment.")
-    return segs, chosen
+    queries=list(semantic_queries or [])
+    if not queries:
+        raise RuntimeError("No ayah-specific visual queries were generated.")
+    segs=[]; chosen=[]
+    for idx in range(count):
+        query=queries[min(idx,len(queries)-1)]
+        cands=search_visual_candidates(v,used,[query])
+        accepted=False
+        for cand in cands:
+            try:
+                raw,offset,height=fetch_scene_segment(cand,seg_len,tmp,idx,v)
+                norm=tmp/f"seg{idx}.mp4"
+                normalize_segment(raw,offset,seg_len,norm)
+                raw.unlink(missing_ok=True)
+            except Exception as exc:
+                print(f"Skipping scene {cand['id']}: {exc}")
+                for item in tmp.glob(f"raw{idx}.*"): item.unlink(missing_ok=True)
+                continue
+            segs.append(norm); chosen.append(cand); used.add(cand["id"])
+            print(f"Scene {len(segs)}/{count}: {cand['title'][:60]} | {height}p | query={query[:70]}")
+            accepted=True
+            break
+        if not accepted:
+            print(f"No matching high-resolution scene found for chronological group {idx+1}: {query}")
+    if len(segs)<int(v["min_segments"]):
+        raise RuntimeError(f"Only {len(segs)} relevant high-resolution scenes were found; refusing a low-quality or mismatched video.")
+    return segs,chosen
 
 def font_path():
     for p in ["/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf","/usr/share/fonts/opentype/noto/NotoNaskhArabic-Regular.ttf"]:
@@ -320,21 +338,43 @@ def compose_video(audio,segs,overlay,out,dur,crossfade,subtitle_path=None):
           "-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-movflags","+faststart",str(out)]
     sh(cmd)
 
-def make_video(audio,led,out,reciter,verse_label):
-    v=visual_cfg(); dur=duration(audio)
+def make_video(audio,led,out,reciter,verse_label,used_ayah_blocks=None):
+    source_duration=duration(audio)
     tmp=Path(tempfile.mkdtemp(prefix="quran_scenes_"))
     try:
-        identified=identify_and_verify_verses(audio,dur,reciter)
+        identified=identify_and_verify_verses(audio,source_duration,reciter)
+        block,start_ms,end_ms,block_key=choose_complete_ayah_block(identified,used_ayah_blocks or set())
+        clipped_audio=tmp/"complete_ayah_block.mp3"
+        extract_audio(audio,start_ms,end_ms,clipped_audio)
+        offset=start_ms/1000.0
+        identified["verses"]=[
+            {**verse,
+             "start_seconds":max(0.0,float(verse["start_seconds"])-offset),
+             "end_seconds":min(duration(clipped_audio),float(verse["end_seconds"])-offset)}
+            for verse in block
+        ]
+        identified["verses"]=[v for v in identified["verses"] if v["end_seconds"]>v["start_seconds"]]
+        if not identified["verses"]:
+            raise RuntimeError("No complete ayah timestamps remain after extracting the verified block.")
+        dur=duration(clipped_audio)
         visual_queries=semantic_visual_queries(identified)
         verses=identified["verses"]
         verse_label=f'{identified["surah_name"]} | الآيات {verses[0]["ayah"]}-{verses[-1]["ayah"]}'
         subtitles=tmp/"ayahs.ass"; write_ayah_subtitles(identified,subtitles)
         segs,chosen=build_scene_segments(dur,led,tmp,visual_queries)
         overlay=tmp/"overlay.png"; make_overlay(overlay,reciter,verse_label)
-        compose_video(audio,segs,overlay,out,dur,float(v["crossfade_seconds"]),str(subtitles))
+        compose_video(clipped_audio,segs,overlay,out,dur,float(visual_cfg()["crossfade_seconds"]),str(subtitles))
         scenes=led.setdefault("scenes",{}); now=int(time.time())
-        for c in chosen: scenes[c["id"]]={"title":c["title"],"used_at":now}
-        return [c["id"] for c in chosen]
+        for scene in chosen: scenes[scene["id"]]={"title":scene["title"],"used_at":now}
+        info={
+            "surah":identified["surah"],
+            "surah_name":identified["surah_name"],
+            "first_ayah":verses[0]["ayah"],
+            "last_ayah":verses[-1]["ayah"],
+            "duration_seconds":round(dur,2),
+            "ayah_block_key":block_key,
+        }
+        return [scene["id"] for scene in chosen],block_key,info
     finally:
         shutil.rmtree(tmp,ignore_errors=True)
 
@@ -435,14 +475,21 @@ def main():
     used_ids={e.get("source_video_id") for e in clips.values() if e.get("source_video_id")}
     selected,clip_key,source_video,audio=pick_and_download(used_ids)
     out=WORK/(clip_key+".mp4")
-    scene_ids=make_video(audio,led,out,selected["reciter"],"تلاوة كاملة")
+    used_ayah_blocks={e.get("ayah_block_key") for e in clips.values() if e.get("ayah_block_key")}
+    scene_ids,ayah_block_key,clip_info=make_video(audio,led,out,selected["reciter"],"تلاوة كاملة",used_ayah_blocks)
     save_ledger(led)
     public_url=cloudinary_upload(out) if instagram_on else None
-    title=f"تلاوة قرآنية خاشعة | {selected['reciter']} #Shorts"
-    caption=(f"تلاوة قرآنية بصوت {selected['reciter']}\nاللهم اجعل القرآن ربيع قلوبنا.\n"
-             "#القرآن #قرآن #تلاوة #ياسر_الدوسري #عبدالرحمن_مسعد #quran #shorts")
+    title=(f"تلاوة سورة {clip_info['surah_name']} | الآيات "
+           f"{clip_info['first_ayah']}-{clip_info['last_ayah']} بصوت {selected['reciter']} #Shorts")[:100]
+    caption=(f"تلاوة قرآنية بصوت {selected['reciter']}\n"
+             f"سورة {clip_info['surah_name']} | الآيات {clip_info['first_ayah']}-{clip_info['last_ayah']}\n"
+             "اللهم اجعل القرآن ربيع قلوبنا.\n#القرآن #قرآن #تلاوة #quran #shorts")
     entry={"source_video_id":selected["id"],"source_title":selected["title"],"source_views":selected["views"],
-           "reciter":selected["reciter"],"scene_ids":scene_ids,"title":title,"caption":caption,"video_url":public_url,
+           "reciter":selected["reciter"],"scene_ids":scene_ids,"ayah_block_key":ayah_block_key,
+           "surah":clip_info["surah"],"surah_name":clip_info["surah_name"],
+           "first_ayah":clip_info["first_ayah"],"last_ayah":clip_info["last_ayah"],
+           "duration_seconds":clip_info["duration_seconds"],
+           "title":title,"caption":caption,"video_url":public_url,
            "youtube_id":None,"instagram_id":None,"created_at":int(time.time())}
     clips[clip_key]=entry; save_ledger(led)
     publish_pending_clip(entry,led,out)

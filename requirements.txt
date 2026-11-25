@@ -9,3 +9,7 @@ yt-dlp[default]==2026.11.23
 # Dependency versions pinned for reproducible GitHub Actions builds.
 # YouTube challenge solving uses yt-dlp[default] (EJS) plus Deno from the workflow.
 # Trigger OAuth fingerprint verification run
+sherpa-onnx>=1.12.0,<2
+soundfile>=0.12.1
+numpy>=1.26,<2
+rapidfuzz>=3.9
