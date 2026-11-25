@@ -55,7 +55,7 @@ def _load_retriever(path):
     # for the pinned upstream revision before loading the module.
     source = Path(path).read_text(encoding="utf-8")
     if "import bisect" not in source:
-        source = "import bisect\\n" + source
+        source = "import bisect\n" + source
         Path(path).write_text(source, encoding="utf-8")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
