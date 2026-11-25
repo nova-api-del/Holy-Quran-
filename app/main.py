@@ -109,7 +109,8 @@ def discover_recitation(used_ids):
             candidates.append({"id":vid,"url":source_url,"title":title,"views":views,"duration":float(dur),"reciter_id":rid,
                               "credit_title":full.get("title") or title,
                               "credit_creator":full.get("uploader") or full.get("channel") or full.get("creator"),
-                              "credit_url":full.get("webpage_url") or full.get("original_url") or source_url})
+                              "credit_url":full.get("webpage_url") or full.get("original_url") or source_url,
+                              "credit_license":full.get("license") or full.get("license_name") or "Creative Commons Attribution"})
     if not candidates: raise RuntimeError("لم نعثر على مقاطع قصيرة مناسبة للقارئين. جرّب التشغيل لاحقاً.")
     candidates.sort(key=lambda x:x["views"],reverse=True)
     selected=random.choice(candidates[:min(10,len(candidates))])
@@ -211,7 +212,8 @@ def scene_url(excluded_urls=None):
             meta=video_metadata(source["url"])
             if has_reusable_license(meta):
                 return ("youtube",source["url"],{"title":meta.get("title"),"creator":meta.get("uploader") or meta.get("channel") or meta.get("creator"),
-                                                "url":meta.get("webpage_url") or meta.get("original_url") or source["url"]})
+                                                "url":meta.get("webpage_url") or meta.get("original_url") or source["url"],
+                                                "license":meta.get("license") or meta.get("license_name") or "Creative Commons Attribution"})
             print("Skipping configured visual source without a reusable CC BY license.")
         except Exception as e:
             print(f"Skipping configured visual source with unverifiable license: {e}")
@@ -247,7 +249,8 @@ def scene_url(excluded_urls=None):
             print(f"Skipping visual source without an explicit reusable CC BY license: {vid}")
             continue
         item["_credit"]={"title":full.get("title"),"creator":full.get("uploader") or full.get("channel") or full.get("creator"),
-                         "url":full.get("webpage_url") or full.get("original_url") or source_url}
+                         "url":full.get("webpage_url") or full.get("original_url") or source_url,
+                         "license":full.get("license") or full.get("license_name") or "Creative Commons Attribution"}
         candidates.append(item)
     if not candidates:
         raise RuntimeError("No visual footage candidates were found.")
@@ -398,9 +401,9 @@ def main():
     public_url=cloudinary_upload(out) if instagram_on else None
     title=f"تلاوة قرآنية خاشعة | {selected['reciter']} #Shorts"
     audio_credit=(f"الصوت: {selected['credit_title']} — {selected['credit_creator']}\n"
-                  f"المصدر: {selected['credit_url']}\nالترخيص: Creative Commons Attribution (CC BY 4.0)")
+                  f"المصدر: {selected['credit_url']}\nالترخيص: {selected['credit_license']}")
     visual_credit=(f"المشاهد: {scene[2]['title']} — {scene[2]['creator']}\n"
-                   f"المصدر: {scene[2]['url']}\nالترخيص: Creative Commons Attribution (CC BY 4.0)")
+                   f"المصدر: {scene[2]['url']}\nالترخيص: {scene[2]['license']}")
     caption=(f"تلاوة قرآنية بصوت {selected['reciter']}\nاللهم اجعل القرآن ربيع قلوبنا.\n"
              "#القرآن #قرآن #تلاوة #ياسر_الدوسري #عبدالرحمن_مسعد #quran #shorts\n\n"
              f"{audio_credit}\n\n{visual_credit}\n"
