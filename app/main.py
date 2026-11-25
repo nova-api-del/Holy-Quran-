@@ -68,6 +68,14 @@ def yt_download(url, out, audio=False):
     sh(base+["--download-sections",f"*0-{end}","--force-keyframes-at-cuts",
              "-f","bv*+ba/b","--merge-output-format","mp4",
              "-o",str(out),url])
+    # Keep the source sharp but lightweight: final output is 1080x1920.
+    # Remove source audio (the recitation is muxed separately).
+    compressed=out.with_name(out.stem+".compressed.mp4")
+    sh(["ffmpeg","-y","-i",str(out),"-vf",
+        "scale=1920:1920:force_original_aspect_ratio=decrease:force_divisible_by=2",
+        "-an","-c:v","libx264","-preset","veryfast","-crf","24",
+        "-movflags","+faststart",str(compressed)])
+    compressed.replace(out)
 
 def video_metadata(url):
     p=subprocess.run(YTDLP+["--no-playlist","--skip-download","--dump-single-json",url],
