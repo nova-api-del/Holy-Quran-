@@ -136,7 +136,7 @@ def choose_complete_ayah_block(rec, used):
         for nxt in verses[i+1:]:
             expected=int(block[-1]["ayah"])+1
             if int(nxt["ayah"]) != expected: break
-            if (float(nxt["end_seconds"])-float(first["start_seconds"]))*1000 > max_ms: break
+            if (float(nxt["end_seconds"])-float(first["start_seconds"]))*1000 > max_ms-600: break
             block.append(nxt)
         key=f"{chapter}:{block[0]['ayah']}-{chapter}:{block[-1]['ayah']}"
         raw_start=float(block[0]["start_seconds"])
@@ -150,10 +150,7 @@ def choose_complete_ayah_block(rec, used):
     start=max(0,int(raw_start*1000)-120)
     end=int(raw_end*1000)+420
     if end-start > max_ms:
-        end=start+max_ms
-        # Never trim the final ayah to fit.
-        if end < int(raw_end*1000):
-            raise RuntimeError("The complete ayah block exceeds the Shorts duration limit.")
+        raise RuntimeError("The complete ayah block plus natural audio tail exceeds the Shorts duration limit.")
     return block,start,end,key
 
 def extract_audio(source_audio, start_ms, end_ms, out):
