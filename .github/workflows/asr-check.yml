@@ -33,6 +33,8 @@ jobs:
         run: |
           python - <<'PY'
           import sherpa_onnx
+          import sys
+          sys.path.insert(0, 'app')
           from quran_asr import _assets, _load_retriever, MODEL_DIR
           model, tokens, retrieve = _assets()
           module = _load_retriever(retrieve)
