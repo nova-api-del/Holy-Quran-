@@ -180,7 +180,7 @@ def choose_complete_ayah_block(rec, used):
         if key not in used and (raw_end-raw_start)*1000 >= min_ms:
             candidates.append((block,key,raw_start,raw_end))
     if not candidates:
-        raise RuntimeError("No unused consecutive complete-ayah block of at least 45 seconds fits the 175-second Shorts limit.")
+        raise RuntimeError(f"No unused consecutive complete-ayah block between {min_ms/1000:.0f} and {max_ms/1000:.0f} seconds fits the Shorts duration range.")
     block,key,raw_start,raw_end=max(candidates,key=lambda x:(x[3]-x[2],len(x[0])))
     # Keep a tiny natural lead-in/tail while never cutting through an ayah.
     start=max(0,int(raw_start*1000)-120)
