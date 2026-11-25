@@ -76,43 +76,32 @@ def _gemini(prompt, audio_path=None):
     raise RuntimeError("All Gemini fallback models failed: " + " | ".join(failures[-8:]))
 
 def identify_and_verify_verses(audio_path, duration_seconds, reciter):
-    prompt = ("استمع إلى الملف الصوتي كاملاً وحدد الآيات القرآنية التي تُتلى كاملة من بدايتها إلى نهايتها. القارئ المتوقع: " + reciter + ".\n"
-      +'أخرج JSON فقط بالشكل {"verses":[{"surah":1,"ayah":1,"start_seconds":0.0,"end_seconds":4.2}]}\n'
-      +"لا تدرج آية يبدأ الصوت من وسطها أو ينتهي قبل اكتمالها. لا تخمّن. إذا لم تجزم فأرجع verses فارغة. كل عنصر آية واحدة، مع رقم السورة والآية وبداية ونهاية زمنيتين بالثواني. الآيات متتابعة من سورة واحدة. مدة الصوت "+str(duration_seconds)+" ثانية. لا تكتب نص القرآن؛ سيؤخذ من مصحف موثوق.")
-    data = _gemini(prompt, audio_path)
-    raw = data.get("verses")
-    if not isinstance(raw, list) or not raw:
-        raise RuntimeError("Gemini could not confidently identify complete Quran verses.")
-    verses = []; sn = None; prev = None
-    for x in raw:
-        s, a = int(x["surah"]), int(x["ayah"])
-        start, end = float(x["start_seconds"]), float(x["end_seconds"])
-        if not (1 <= s <= 114 and a >= 1 and 0 <= start < end <= duration_seconds + 0.75):
-            raise RuntimeError("Invalid verse numbers or timestamps from Gemini.")
-        if sn is None: sn = s
-        if s != sn or (prev is not None and a != prev + 1):
-            raise RuntimeError("Verses are not consecutive in one surah.")
-        prev = a
-        verses.append({"surah": s, "ayah": a, "start_seconds": max(0, start), "end_seconds": min(duration_seconds, end)})
-    response = requests.get(QURAN_API + "/surah/" + str(sn) + "/quran-uthmani", timeout=45)
-    response.raise_for_status()
-    data = response.json()["data"]
-    canonical = {int(x["numberInSurah"]): x["text"] for x in data["ayahs"]}
+    # Quran-specific ASR is the source of truth for verse identity. Gemini is not
+    # allowed to guess ayah numbers or caption text.
+    from quran_asr import transcribe_and_match
+
+    identified = transcribe_and_match(audio_path, duration_seconds, reciter)
+    verses = identified.get("verses") or []
+    if not verses:
+        raise RuntimeError("Quran ASR could not verify any complete ayahs.")
+    previous = None
     for verse in verses:
-        if verse["ayah"] not in canonical:
-            raise RuntimeError("Canonical Quran text missing.")
-        verse["text"] = canonical[verse["ayah"]]
-    for i, verse in enumerate(verses):
-        if verse["end_seconds"] - verse["start_seconds"] < 0.35:
-            raise RuntimeError("Ayah timing too short.")
-        if i and verse["start_seconds"] < verses[i-1]["end_seconds"] - 0.25:
-            raise RuntimeError("Overlapping ayah timestamps.")
-    return {"surah": sn, "surah_name": data.get("name") or "السورة " + str(sn), "verses": verses}
+        surah, ayah = int(verse["surah"]), int(verse["ayah"])
+        start, end = float(verse["start_seconds"]), float(verse["end_seconds"])
+        if not (1 <= surah <= 114 and ayah >= 1 and 0 <= start < end <= duration_seconds + 0.5):
+            raise RuntimeError("Quran ASR returned an invalid verse number or timestamp.")
+        if previous and (surah != previous[0] or ayah != previous[1] + 1):
+            raise RuntimeError("Quran ASR verses are not consecutive in one surah.")
+        if end - start < 0.35:
+            raise RuntimeError(f"Quran ASR timing is too short for {surah}:{ayah}.")
+        previous = (surah, ayah)
+    return identified
 
 def _local_visual_queries(identified):
     # Deterministic offline fallback: map Quranic Arabic themes to matching
     # footage searches; no model/API call is needed for scene selection.
     text = " ".join(v.get("text", "") for v in identified.get("verses", []))
+    text = re.sub(r"[\u064B-\u065F\u0670\u06D6-\u06EDـ]", "", text)
     themes = [
         (("ماء", "الماء", "أنهار", "نهر", "بحر", "البحر", "مطر", "المطر", "غيث"), "clear water rivers waterfalls rain aerial nature footage"),
         (("سماء", "السماوات", "نجوم", "النجوم", "كواكب"), "dramatic sky stars galaxy clouds timelapse footage"),
@@ -137,18 +126,50 @@ def _local_visual_queries(identified):
     return queries[:10]
 
 def semantic_visual_queries(identified):
-    body = "\n".join(str(v["ayah"]) + ". " + v["text"] for v in identified["verses"])
-    prompt = ("Understand these canonical Quran verses and return JSON only: {\"queries\":[\"English search query\"]}. Give 6-10 concise English YouTube searches for respectful cinematic footage directly reflecting their meaning: nature, sky, landscape, water, architecture, light. Avoid people, faces, religious depictions, text overlays, music videos and unrelated scenery.\n" + identified["surah_name"] + "\n" + body)
+    verses = identified["verses"]
+    start = min(float(v["start_seconds"]) for v in verses)
+    end = max(float(v["end_seconds"]) for v in verses)
+    duration = max(1.0, end - start)
+    count = max(4, min(10, round(duration / 17.5)))
+    groups = [[] for _ in range(count)]
+    for verse in verses:
+        midpoint = (float(verse["start_seconds"]) + float(verse["end_seconds"])) / 2
+        index = max(0, min(count - 1, int((midpoint - start) / duration * count)))
+        groups[index].append(verse)
+
+    descriptions = []
+    fallback = []
+    for index, group in enumerate(groups, 1):
+        if group:
+            first, last = group[0]["ayah"], group[-1]["ayah"]
+            group_text = " ".join(v["text"] for v in group)
+            descriptions.append(f"Scene {index}, ayahs {first}-{last}: {group_text}")
+            local = _local_visual_queries({"verses": group})
+            fallback.append(local[0] if local else "cinematic natural landscape matching the Quranic theme")
+        else:
+            descriptions.append(f"Scene {index}: choose a respectful visual continuation of the nearby Quranic meaning.")
+            fallback.append("cinematic landscape, sky and light matching the nearby Quranic meaning")
+
+    prompt = (
+        'Return JSON only in the form {"queries":["English YouTube search query"]}. '
+        f"Return exactly {count} queries in chronological order. Each query must describe footage "
+        "that directly illustrates the meaning of its own ayah group, not generic unrelated scenery. "
+        "Use concrete visual subjects and actions when present (rain, rivers, mountains, night, dawn, "
+        "gardens, ships, stars, wind, etc.). Be respectful: no depiction of Allah, prophets, angels, "
+        "religious figures, worshippers, faces, or text. Prefer cinematic 4K/8K landscape or nature footage.\n"
+        + identified["surah_name"] + "\n" + "\n".join(descriptions)
+    )
     try:
-        queries = _gemini(prompt).get("queries")
+        response = _gemini(prompt)
+        queries = response.get("queries") if isinstance(response, dict) else None
         if isinstance(queries, list):
             queries = [str(x).strip() for x in queries if str(x).strip()]
-            if len(queries) >= 2:
-                return queries[:10]
-        print("Gemini scene response unusable; using offline Quran-theme scene matching.")
+            if len(queries) == count:
+                return queries
+        print("Gemini scene response did not match the required scene count; using ayah-specific local queries.")
     except Exception as exc:
-        print(f"Gemini scene analysis unavailable ({exc}); using offline Quran-theme scene matching.")
-    return _local_visual_queries(identified)
+        print(f"Gemini scene analysis unavailable ({exc}); using ayah-specific local queries.")
+    return fallback
 
 def _ass_time(sec):
     cs = max(0, int(round(float(sec) * 100)))
