@@ -356,14 +356,14 @@ def youtube_upload(path,title,description):
 
 def instagram_reel(url,caption):
     token=os.environ["META_ACCESS_TOKEN"]; ig=os.environ["IG_USER_ID"]
-    r=requests.post(f"https://graph.facebook.com/v24.0/{ig}/media",data={"media_type":"REELS","video_url":url,"caption":caption,"access_token":token},timeout=60)
+    r=requests.post(f"https://graph.facebook.com/v27.0/{ig}/media",data={"media_type":"REELS","video_url":url,"caption":caption,"access_token":token},timeout=60)
     r.raise_for_status(); cid=r.json()["id"]
     for _ in range(30):
-        s=requests.get(f"https://graph.facebook.com/v24.0/{cid}",params={"fields":"status_code","access_token":token},timeout=30)
+        s=requests.get(f"https://graph.facebook.com/v27.0/{cid}",params={"fields":"status_code","access_token":token},timeout=30)
         s.raise_for_status()
         if s.json().get("status_code")=="FINISHED": break
         time.sleep(10)
-    p=requests.post(f"https://graph.facebook.com/v24.0/{ig}/media_publish",data={"creation_id":cid,"access_token":token},timeout=60)
+    p=requests.post(f"https://graph.facebook.com/v27.0/{ig}/media_publish",data={"creation_id":cid,"access_token":token},timeout=60)
     p.raise_for_status(); return p.json()["id"]
 
 def main():
