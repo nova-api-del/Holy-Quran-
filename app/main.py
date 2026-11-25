@@ -259,8 +259,7 @@ def make_video(audio,scene,out,reciter,verse_label):
         yt_download(scene[1],scene_path,audio=False)
     else:
         r=requests.get(scene[1],timeout=(15,120)); r.raise_for_status(); scene_path.write_bytes(r.content)
-    if scene_has_branding(scene_path):
-        raise SceneRejected("Scene rejected because a company logo, brand mark, or watermark was detected.")
+    # Branding/logo screening disabled as requested.
     dur=duration(audio)
     img=Image.new("RGBA",(1080,1920),(0,0,0,0)); d=ImageDraw.Draw(img)
     f=ImageFont.truetype(font_path(),CFG["visual_style"]["font_size"])
@@ -378,17 +377,8 @@ def main():
     source_video=WORK/(clip_key+"_source.mp4"); audio=WORK/(clip_key+".mp3")
     if not source_video.exists() or not audio.exists(): download_complete_short(selected["url"],source_video,audio)
     out=WORK/(clip_key+".mp4")
-    rejected_scenes=set()
-    for attempt in range(5):
-        scene=scene_url(rejected_scenes)
-        try:
-            make_video(audio,scene,out,selected["reciter"],"تلاوة كاملة")
-            break
-        except SceneRejected as e:
-            rejected_scenes.add(scene[1])
-            print(f"Rejected branded scene ({attempt+1}/5): {e}")
-    else:
-        raise RuntimeError("Could not find a scene without visible logos or watermarks after 5 attempts.")
+    scene=scene_url()
+    make_video(audio,scene,out,selected["reciter"],"تلاوة كاملة")
     public_url=cloudinary_upload(out) if instagram_on else None
     title=f"تلاوة قرآنية خاشعة | {selected['reciter']} #Shorts"
     audio_credit=(f"الصوت: {selected['credit_title']} — {selected['credit_creator']}\n"
