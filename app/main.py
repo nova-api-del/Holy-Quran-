@@ -62,6 +62,26 @@ def yt_download(url, out, audio=False):
     cmd += [url]
     sh(cmd)
 
+def video_metadata(url):
+    """Read the complete source metadata without downloading the media."""
+    p=subprocess.run(
+        YTDLP+["--no-playlist","--skip-download","--dump-single-json",url],
+        capture_output=True,text=True,check=True,timeout=120
+    )
+    return json.loads(p.stdout)
+
+def has_reusable_license(item):
+    # Only accept an explicit CC BY license. Standard YouTube licenses,
+    # missing license metadata, NC, ND and SA variants are not accepted.
+    license_text=" ".join(str(item.get(k) or "") for k in ("license","license_name","license_url")).lower()
+    if not license_text:
+        return False
+    if any(term in license_text for term in ("noncommercial","non-commercial","cc by-nc","cc-by-nc","no derivatives","no-derivatives","cc by-nd","cc-by-nd","sharealike","share-alike","cc by-sa","cc-by-sa")):
+        return False
+    return ("creative commons attribution" in license_text or
+            "creativecommons.org/licenses/by/" in license_text or
+            "cc by 4.0" in license_text or "cc-by-4.0" in license_text)
+
 def discover_recitation(used_ids):
     queries=[("yasser_al_dosari","ياسر الدوسري قرآن آيات قصيرة"),("abdulrahman_al_mossad","عبدالرحمن مسعد قرآن آيات قصيرة")]
     candidates=[]
@@ -79,7 +99,16 @@ def discover_recitation(used_ids):
             if not any(t in low for t in terms): continue
             views=int(item.get("view_count") or 0)
             if views<1000: continue
-            candidates.append({"id":vid,"url":item.get("url") or f"https://www.youtube.com/watch?v={vid}","title":title,"views":views,"duration":float(dur),"reciter_id":rid})
+            source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
+            try:
+                full=video_metadata(source_url)
+            except Exception as e:
+                print(f"Skipping recitation with unverifiable license {vid}: {e}")
+                continue
+            if not has_reusable_license(full):
+                print(f"Skipping recitation without an explicit reusable CC BY license: {vid}")
+                continue
+            candidates.append({"id":vid,"url":source_url,"title":title,"views":views,"duration":float(dur),"reciter_id":rid,"license":full.get("license")})
     if not candidates: raise RuntimeError("لم نعثر على مقاطع قصيرة مناسبة للقارئين. جرّب التشغيل لاحقاً.")
     candidates.sort(key=lambda x:x["views"],reverse=True)
     selected=random.choice(candidates[:min(10,len(candidates))])
@@ -139,8 +168,14 @@ def scene_url():
     # Discover atmospheric B-roll directly on YouTube. The source video's
     # soundtrack is never used; only its picture is layered under the recitation.
     configured=[x for x in CFG.get("visual_sources",[]) if x.get("enabled") and x.get("url")]
-    if configured:
-        return ("youtube",random.choice(configured)["url"])
+    for source in configured:
+        try:
+            meta=video_metadata(source["url"])
+            if has_reusable_license(meta):
+                return ("youtube",source["url"])
+            print("Skipping configured visual source: no explicit reusable CC BY license.")
+        except Exception as e:
+            print(f"Skipping configured visual source with unverifiable license: {e}")
     queries=[
         "cinematic nature scenery 4k mountains clouds river",
         "peaceful ocean waves sunset cinematic 4k",
@@ -165,9 +200,19 @@ def scene_url():
         if not vid or not dur or float(dur)<12: continue
         if any(word in title for word in ["lyrics","music video","song","nasheed","recitation","quran","reaction","gameplay"]):
             continue
+        source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
+        try:
+            full=video_metadata(source_url)
+        except Exception as e:
+            print(f"Skipping visual source with unverifiable license {vid}: {e}")
+            continue
+        if not has_reusable_license(full):
+            print(f"Skipping visual source without an explicit reusable CC BY license: {vid}")
+            continue
+        item["_verified_license"]=full.get("license")
         candidates.append(item)
     if not candidates:
-        raise RuntimeError("No suitable YouTube visual footage found.")
+        raise RuntimeError("No visual footage with a verified reusable CC BY license was found.")
     chosen=random.choice(candidates[:15])
     return ("youtube",chosen.get("url") or f"https://www.youtube.com/watch?v={chosen['id']}")
 
