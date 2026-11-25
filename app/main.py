@@ -1,4 +1,4 @@
-import os, json, random, hashlib, subprocess, time
+import os, json, random, hashlib, subprocess, time, base64
 from pathlib import Path
 import requests
 from PIL import Image, ImageDraw, ImageFont
@@ -127,6 +127,42 @@ def duration(p):
     r=subprocess.run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(p)],capture_output=True,text=True,check=True)
     return float(r.stdout.strip())
 
+class SceneRejected(Exception):
+    pass
+
+def scene_has_branding(video_path):
+    api_key=os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is required for the visual logo/watermark check.")
+    total=duration(video_path)
+    timestamps=sorted(set(max(0.1,min(total-0.1,total*x)) for x in (0.08,0.25,0.50,0.75,0.92)))
+    parts=[{"text":"Inspect these sampled frames from one video. Detect any visible company logo, brand mark, product logo, channel logo, watermark, or corporate emblem, including graphic symbols without readable text. Ignore natural shapes and ordinary scenery. Return only JSON: {\"has_branding\": true or false, \"evidence\": \"short description\"}. If uncertain, set has_branding to true."}]
+    frame_files=[]
+    try:
+        for i,ts in enumerate(timestamps):
+            frame=WORK/f"logo_check_{i}.jpg"
+            subprocess.run(["ffmpeg","-y","-ss",f"{ts:.3f}","-i",str(video_path),"-frames:v","1","-vf","scale=640:-2","-q:v","4",str(frame)],capture_output=True,check=True)
+            if not frame.exists() or frame.stat().st_size==0:
+                raise RuntimeError("Could not extract frames for logo detection.")
+            frame_files.append(frame)
+            parts.append({"inline_data":{"mime_type":"image/jpeg","data":base64.b64encode(frame.read_bytes()).decode("ascii")}})
+        endpoint="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        response=requests.post(endpoint,params={"key":api_key},json={
+            "contents":[{"parts":parts}],
+            "generationConfig":{"temperature":0,"responseMimeType":"application/json"}
+        },timeout=120)
+        response.raise_for_status()
+        answer=response.json()["candidates"][0]["content"]["parts"][0]["text"]
+        verdict=json.loads(answer)
+        if not isinstance(verdict.get("has_branding"),bool):
+            raise RuntimeError("Gemini returned an invalid logo-check result.")
+        print("Visual branding check:",json.dumps(verdict,ensure_ascii=False))
+        return verdict["has_branding"]
+    finally:
+        for frame in frame_files:
+            frame.unlink(missing_ok=True)
+
+
 def choose_complete_ayah_block(rec, used):
     verses=rec.get("verses") or []
     if not verses:
@@ -164,10 +200,11 @@ def extract_audio(source_audio, start_ms, end_ms, out):
     sh(["ffmpeg","-y","-ss",f"{start_ms/1000:.3f}","-i",str(source_audio),
         "-t",f"{(end_ms-start_ms)/1000:.3f}","-vn","-c:a","libmp3lame","-q:a","2",str(out)])
 
-def scene_url():
+def scene_url(excluded_urls=None):
     # Discover atmospheric B-roll directly on YouTube. The source video's
     # soundtrack is never used; only its picture is layered under the recitation.
-    configured=[x for x in CFG.get("visual_sources",[]) if x.get("enabled") and x.get("url")]
+    excluded_urls=excluded_urls or set()
+    configured=[x for x in CFG.get("visual_sources",[]) if x.get("enabled") and x.get("url") and x.get("url") not in excluded_urls]
     for source in configured:
         try:
             meta=video_metadata(source["url"])
@@ -226,6 +263,8 @@ def make_video(audio,scene,out,reciter,verse_label):
     if scene[0]=="youtube": yt_download(scene[1],scene_path,audio=False)
     else:
         r=requests.get(scene[1],timeout=120); r.raise_for_status(); scene_path.write_bytes(r.content)
+    if scene_has_branding(scene_path):
+        raise SceneRejected("Scene rejected because a company logo, brand mark, or watermark was detected.")
     dur=duration(audio)
     bg=WORK/"bg.mp4"
     sh(["ffmpeg","-y","-stream_loop","-1","-i",str(scene_path),"-t",f"{dur:.3f}",
@@ -343,9 +382,18 @@ def main():
     clip_key=hashlib.sha256(selected["id"].encode()).hexdigest()[:12]
     source_video=WORK/(clip_key+"_source.mp4"); audio=WORK/(clip_key+".mp3")
     if not source_video.exists() or not audio.exists(): download_complete_short(selected["url"],source_video,audio)
-    scene=scene_url()
     out=WORK/(clip_key+".mp4")
-    make_video(audio,scene,out,selected["reciter"],"تلاوة كاملة")
+    rejected_scenes=set()
+    for attempt in range(5):
+        scene=scene_url(rejected_scenes)
+        try:
+            make_video(audio,scene,out,selected["reciter"],"تلاوة كاملة")
+            break
+        except SceneRejected as e:
+            rejected_scenes.add(scene[1])
+            print(f"Rejected branded scene ({attempt+1}/5): {e}")
+    else:
+        raise RuntimeError("Could not find a licensed scene without visible logos or watermarks after 5 attempts.")
     public_url=cloudinary_upload(out) if instagram_on else None
     title=f"تلاوة قرآنية خاشعة | {selected['reciter']} #Shorts"
     caption=(f"تلاوة قرآنية بصوت {selected['reciter']}\nاللهم اجعل القرآن ربيع قلوبنا.\n"
