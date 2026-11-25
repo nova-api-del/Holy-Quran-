@@ -121,6 +121,29 @@
       "youtube_id": "Yem6d7jN-_U",
       "instagram_id": null,
       "created_at": 1795566977
+    },
+    "26142d6b8c46": {
+      "source_video_id": "lOfWHM6HE6Y",
+      "source_title": "ولا تحسبن الله غافلاً عما يعمل الظالمون | تلاوة رائعة بصوت القارىء عبدالرحمن مسعد",
+      "source_views": 1189531,
+      "reciter": "عبدالرحمن مسعد",
+      "scene_ids": [
+        "yao9ww00ul4",
+        "QUqhgZjrrsE",
+        "_CeDOpCFwOY"
+      ],
+      "ayah_block_key": "14:44-14:45",
+      "surah": 14,
+      "surah_name": "سُورَةُ إِبۡرَاهِيمَ",
+      "first_ayah": 44,
+      "last_ayah": 45,
+      "duration_seconds": 69.58,
+      "title": "تلاوة سورة سُورَةُ إِبۡرَاهِيمَ | الآيات 44-45 بصوت عبدالرحمن مسعد #Shorts",
+      "caption": "تلاوة قرآنية بصوت عبدالرحمن مسعد\nسورة سُورَةُ إِبۡرَاهِيمَ | الآيات 44-45\nاللهم اجعل القرآن ربيع قلوبنا.\n#القرآن #قرآن #تلاوة #quran #shorts",
+      "video_url": null,
+      "youtube_id": "MwreVfom_eg",
+      "instagram_id": null,
+      "created_at": 1795569578
     }
   },
   "scenes": {
@@ -203,6 +226,18 @@
     "2ihYj82mREE": {
       "title": "VAST - Cinematic FPV & Drone In Iceland. 4K.",
       "used_at": 1795566977
+    },
+    "yao9ww00ul4": {
+      "title": "Visuals - Your Name (4K)",
+      "used_at": 1795569578
+    },
+    "QUqhgZjrrsE": {
+      "title": "Spend The Night In An Exclusive Luxury Miami Apartment | Heavy Rain & Thunder Sounds Outside | 4K",
+      "used_at": 1795569578
+    },
+    "_CeDOpCFwOY": {
+      "title": "Virtual Egypt 4K: What Did the Pyramids Look Like?",
+      "used_at": 1795569578
     }
   }
 }
