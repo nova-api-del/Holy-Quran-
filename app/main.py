@@ -69,15 +69,19 @@ def yt_download(url, out, audio=False):
     limit=min(58,int(CFG["publish"].get("max_seconds",58)))
     end=float(limit)
     out.unlink(missing_ok=True)
+    # Prefer the highest available source resolution, then fall back gradually:
+    # 4K -> 1440p -> 1080p -> 720p -> best available (including lower resolutions).
+    best_format=("bv*[height>=2160]+ba/bv*[height>=1440]+ba/"
+                 "bv*[height>=1080]+ba/bv*[height>=720]+ba/bv*+ba/b")
     sh(base+["--download-sections",f"*0-{end}","--force-keyframes-at-cuts",
-             "-f","bv*+ba/b","--merge-output-format","mp4",
+             "-f",best_format,"--merge-output-format","mp4",
              "-o",str(out),url])
-    # Keep the source sharp but lightweight: final output is 1080x1920.
-    # Remove source audio (the recitation is muxed separately).
+    # Preserve the downloaded resolution up to 1920px; never upscale smaller sources.
+    # Keep a high-quality intermediate; the recitation is muxed separately.
     compressed=out.with_name(out.stem+".compressed.mp4")
     sh(["ffmpeg","-y","-i",str(out),"-vf",
-        "scale=1920:1920:force_original_aspect_ratio=decrease:force_divisible_by=2",
-        "-an","-c:v","libx264","-preset","veryfast","-crf","24",
+        "scale=w='min(1920,iw)':h='min(1920,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
+        "-an","-c:v","libx264","-preset","fast","-crf","19",
         "-movflags","+faststart",str(compressed)])
     compressed.replace(out)
 
