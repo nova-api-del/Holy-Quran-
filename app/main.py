@@ -38,12 +38,16 @@ def publish_pending_clip(entry, led, path):
         entry["youtube_id"]=youtube_upload(path, entry["title"], entry["caption"])
         save_ledger(led)
         print("YouTube published:", entry["youtube_id"])
-    if CFG["publish"].get("instagram") and not entry.get("instagram_id"):
+    instagram_secrets=("CLOUDINARY_CLOUD_NAME","CLOUDINARY_API_KEY","CLOUDINARY_API_SECRET","META_ACCESS_TOKEN","IG_USER_ID")
+    instagram_ready=CFG["publish"].get("instagram") and all(os.environ.get(k) for k in instagram_secrets)
+    if instagram_ready and not entry.get("instagram_id"):
         if not entry.get("video_url"):
-            raise RuntimeError("Instagram is enabled but this clip has no Cloudinary video URL.")
+            raise RuntimeError("Instagram credentials are configured but this clip has no Cloudinary video URL.")
         entry["instagram_id"]=instagram_reel(entry["video_url"], entry["caption"])
         save_ledger(led)
         print("Instagram published:", entry["instagram_id"])
+    elif CFG["publish"].get("instagram") and not instagram_ready:
+        print("Instagram skipped: Cloudinary/Meta credentials are incomplete; YouTube publishing continues.")
 
 
 def yt_cookie_file():
@@ -458,10 +462,10 @@ def publish_special_surah_part(led,clips,youtube_on,instagram_on):
     make_video(audio,scenes,out,"ياسر الدوسري",f"سورة ق • الجزء {part}")
     public_url=cloudinary_upload(out) if instagram_on else None
     title=f"سورة ق كاملة بصوت ياسر الدوسري | الجزء {part} #Shorts"
-    credits="\\n".join(f"المشهد {i+1}: {s[2]['title']} — {s[2]['creator']}\\nالمصدر: {s[2]['url']}" for i,s in enumerate(scenes))
-    caption=(f"سورة ق كاملة بصوت الشيخ ياسر الدوسري — الجزء {part}\\n"
-             "#سورة_ق #ياسر_الدوسري #القرآن #تلاوة #quran #shorts\\n\\n"
-             f"{credits}\\nالتعديلات: تقسيم التلاوة وإضافة مشاهد سينمائية متتابعة والنص.")
+    credits="\n".join(f"المشهد {i+1}: {s[2]['title']} — {s[2]['creator']}\nالمصدر: {s[2]['url']}" for i,s in enumerate(scenes))
+    caption=(f"سورة ق كاملة بصوت الشيخ ياسر الدوسري — الجزء {part}\n"
+             "#سورة_ق #ياسر_الدوسري #القرآن #تلاوة #quran #shorts\n\n"
+             f"{credits}\nالتعديلات: تقسيم التلاوة وإضافة مشاهد سينمائية متتابعة والنص.")
     entry={"source_video_id":"RqeOrREVOZE","source_title":series.get("source_title"),
         "reciter":"ياسر الدوسري","title":title,"caption":caption,"video_url":public_url,
         "scene_url":scenes[0][1],"scene_urls":[s[1] for s in scenes],
@@ -592,12 +596,12 @@ def main():
     make_video(audio,scenes,out,selected["reciter"],"تلاوة كاملة")
     public_url=cloudinary_upload(out) if instagram_on else None
     title=f"تلاوة قرآنية خاشعة | {selected['reciter']} #Shorts"
-    audio_credit=(f"الصوت: {selected['credit_title']} — {selected['credit_creator']}\\n"
+    audio_credit=(f"الصوت: {selected['credit_title']} — {selected['credit_creator']}\n"
                   f"المصدر: {selected['credit_url']}")
-    visual_credit="\\n".join(f"المشهد {i+1}: {s[2]['title']} — {s[2]['creator']}\\nالمصدر: {s[2]['url']}" for i,s in enumerate(scenes))
-    caption=(f"تلاوة قرآنية بصوت {selected['reciter']}\\nاللهم اجعل القرآن ربيع قلوبنا.\\n"
-             "#القرآن #قرآن #تلاوة #ياسر_الدوسري #عبدالرحمن_مسعد #quran #shorts\\n\\n"
-             f"{audio_credit}\\n\\n{visual_credit}\\n"
+    visual_credit="\n".join(f"المشهد {i+1}: {s[2]['title']} — {s[2]['creator']}\nالمصدر: {s[2]['url']}" for i,s in enumerate(scenes))
+    caption=(f"تلاوة قرآنية بصوت {selected['reciter']}\nاللهم اجعل القرآن ربيع قلوبنا.\n"
+             "#القرآن #قرآن #تلاوة #ياسر_الدوسري #عبدالرحمن_مسعد #quran #shorts\n\n"
+             f"{audio_credit}\n\n{visual_credit}\n"
              "التعديلات: استخراج الصوت، قصّ المشاهد ودمجها مع التلاوة والنص.")
     entry={"source_video_id":selected["id"],"source_title":selected["title"],"source_views":selected["views"],
         "reciter":selected["reciter"],"title":title,"caption":caption,"video_url":public_url,
