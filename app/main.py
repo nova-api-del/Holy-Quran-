@@ -339,14 +339,20 @@ def scene_url(excluded_urls=None):
             source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
             if source_url in excluded_urls: continue
             title=item.get("title") or "YouTube visual footage"
+            # Do not reject videos by title keywords: Shorts, compilations,
+            # and other formats may contain excellent cinematic footage.
+            # Rank candidates using available metadata, then let the actual
+            # downloaded frames determine visual suitability.
             low=title.lower()
-            bad_terms=("shorts","reaction","compilation","lyrics","news","review","music")
-            if any(term in low for term in bad_terms): continue
+            quality_terms=("4k","uhd","cinematic","drone","aerial","nature","landscape",
+                           "scenery","relaxing","beautiful","8k","hdr")
+            quality_hint=sum(1 for term in quality_terms if term in low)
             candidates.append({
                 "url":source_url,"title":title,
                 "creator":item.get("channel") or item.get("uploader") or "غير محدد",
                 "views":int(item.get("view_count") or 0),
-                "duration":float(item.get("duration") or 0)
+                "duration":float(item.get("duration") or 0),
+                "quality_hint":quality_hint
             })
         if len(candidates)>=50:
             break
@@ -367,7 +373,7 @@ def scene_url(excluded_urls=None):
                                           "creator":"مصدر مستخدم سابقاً","url":reused_url})
         raise RuntimeError("No visual footage candidates were found.")
 
-    candidates.sort(key=lambda x:(x["views"],min(x["duration"],600)),reverse=True)
+    candidates.sort(key=lambda x:(x["quality_hint"],x["views"],min(x["duration"],600)),reverse=True)
     pool=candidates[:min(60,len(candidates))]
     chosen=random.choice(pool)
     credit={"title":chosen["title"],"creator":chosen["creator"],"url":chosen["url"]}
