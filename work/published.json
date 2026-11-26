@@ -48,5 +48,12 @@
       "instagram_id": null,
       "created_at": 1795558868
     }
+  },
+  "special_series": {
+    "active": true,
+    "url": "https://youtu.be/RqeOrREVOZE",
+    "reciter": "ياسر الدوسري",
+    "next_start": 0.0,
+    "next_part": 1
   }
 }
