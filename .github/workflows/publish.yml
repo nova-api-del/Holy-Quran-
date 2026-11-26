@@ -3,6 +3,9 @@ on:
   push:
     paths:
       - requirements.txt
+      - app/**
+      - config/**
+      - .github/workflows/publish.yml
   workflow_dispatch:
   schedule:
     # 12:00 and 20:00 Iraq time (UTC+3)
@@ -15,7 +18,7 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - name: Install ffmpeg and Arabic fonts
@@ -92,6 +95,6 @@ jobs:
           done
           git add .gitignore
           # Persist only small state/diagnostic files, never video or audio assets.
-          git add -A work/ledger.json work/diagnostics.json work/diagnostics.md 2>/dev/null || true
+          git add -A work/published.json work/diagnostics.json work/diagnostics.md 2>/dev/null || true
           git commit -m "chore: save workflow diagnostics and publication ledger" || true
           git push || true
