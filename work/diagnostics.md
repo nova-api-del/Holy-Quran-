@@ -1,6 +1,6 @@
 # Latest workflow diagnostics
 
-- Checked (UTC): 2026-11-25T14:31:00.563821+00:00
+- Checked (UTC): 2026-11-26T14:40:42.116829+00:00
 - Check: YouTube OAuth secret fingerprint baseline
 - OAuth refresh: deferred to app/main.py so the exact upload-process credentials are tested once
 
@@ -21,4 +21,4 @@
 ## Workflow result
 
 - OAuth diagnostic step: success
-- Build and publish step: failure
+- Build and publish step: success
