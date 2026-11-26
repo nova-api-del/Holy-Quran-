@@ -567,7 +567,29 @@ def main():
         print("Instagram is configured but its Cloudinary/Meta secrets are incomplete; YouTube can still publish.")
     if not youtube_on and not instagram_on: raise SystemExit("Both publishing platforms are disabled.")
 
-    # Finish any partially published clip before generating the next one.
+    if led.get("special_series") is None:
+        led["special_series"]={"active":True,"url":SPECIAL_SURAH_Q_URL,"reciter":"ياسر الدوسري",
+                               "next_start":0.0,"next_part":1}
+        save_ledger(led)
+
+    # The special Surah Q series has priority over old queued regular clips.
+    # Resume an interrupted Surah Q part first so a successful platform is never duplicated.
+    if led.get("special_series",{}).get("active",True):
+        for clip_key,entry in clips.items():
+            if entry.get("series_end") is None:
+                continue
+            yt_done=(not youtube_on) or bool(entry.get("youtube_id"))
+            ig_done=(not instagram_on) or bool(entry.get("instagram_id"))
+            if not (yt_done and ig_done):
+                local=WORK/(clip_key+".mp4")
+                if entry.get("video_url") or local.exists():
+                    publish_pending_clip(entry,led,local)
+                    advance_special_series(entry,led)
+                    return
+        publish_special_surah_part(led,clips,youtube_on,instagram_on)
+        return
+
+    # After the one-time series, resume any older queued clips before normal discovery.
     for clip_key,entry in clips.items():
         yt_done=(not youtube_on) or bool(entry.get("youtube_id"))
         ig_done=(not instagram_on) or bool(entry.get("instagram_id"))
@@ -575,16 +597,7 @@ def main():
             local=WORK/(clip_key+".mp4")
             if entry.get("video_url") or local.exists():
                 publish_pending_clip(entry,led,local)
-                advance_special_series(entry,led)
                 return
-
-    if led.get("special_series") is None:
-        led["special_series"]={"active":True,"url":SPECIAL_SURAH_Q_URL,"reciter":"ياسر الدوسري",
-                               "next_start":0.0,"next_part":1}
-        save_ledger(led)
-    if led.get("special_series",{}).get("active",True):
-        publish_special_surah_part(led,clips,youtube_on,instagram_on)
-        return
 
     # Once all of Surah Q is posted, return to the existing regular rotation.
     selected=discover_recitation(set())
