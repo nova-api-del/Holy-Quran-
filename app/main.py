@@ -325,7 +325,7 @@ def scene_url(excluded_urls=None):
     query=random.choice(queries)
     p=subprocess.run(
         YTDLP+["--flat-playlist","--dump-single-json","--socket-timeout","30",
-               "--retries","5","--extractor-retries","5",f"ytsearch30:{query}"],
+               "--retries","5","--extractor-retries","5",f"ytsearch100:{query}"],
         capture_output=True,text=True,check=True,timeout=180
     )
     data=json.loads(p.stdout)
@@ -335,21 +335,35 @@ def scene_url(excluded_urls=None):
         if not vid: continue
         source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
         if source_url in excluded_urls: continue
-        candidates.append({"url":source_url,"title":item.get("title") or "YouTube visual footage",
-                           "creator":item.get("channel") or item.get("uploader") or "غير محدد"})
+        title=item.get("title") or "YouTube visual footage"
+        low=title.lower()
+        # Avoid obvious non-cinematic/search-noise results.
+        bad_terms=("shorts","reaction","compilation","music","lyrics","news","review")
+        if any(term in low for term in bad_terms): continue
+        candidates.append({"url":source_url,"title":title,
+                           "creator":item.get("channel") or item.get("uploader") or "غير محدد",
+                           "views":int(item.get("view_count") or 0),
+                           "duration":float(item.get("duration") or 0)})
     if not candidates:
         # Reuse a previous scene only when no fresh visual candidate is available.
-        previous=[e for e in ledger().get("clips",{}).values() if e.get("scene_url") and e.get("scene_url") not in excluded_urls]
+        previous=[e for e in ledger().get("clips",{}).values()
+                  for u in (e.get("scene_urls") or [e.get("scene_url")])
+                  if u and u not in excluded_urls]
         if previous:
-            fallback=random.choice(previous)
-            reused_url=fallback["scene_url"]
-            print("No new visual scenes found; reusing a previous scene as fallback.")
+            reused_url=random.choice(previous)
+            print("No fresh visual candidates found; reusing a previous scene as fallback.")
             return ("youtube",reused_url,{"title":"مشهد سابق من فيديو منشور",
                                           "creator":"مصدر مستخدم سابقاً",
                                           "url":reused_url})
         raise RuntimeError("No visual footage candidates were found and no previous scene is available.")
-    chosen=random.choice(candidates[:min(15,len(candidates))])
+
+    # Do not take the first search result. Prefer established, longer footage
+    # and rank by popularity, then randomly choose among the strongest candidates.
+    candidates.sort(key=lambda x:(x["views"], min(x["duration"],600)), reverse=True)
+    pool=candidates[:min(25,len(candidates))]
+    chosen=random.choice(pool)
     credit={"title":chosen["title"],"creator":chosen["creator"],"url":chosen["url"]}
+    print(f"Selected visual: {chosen['title']} | views={chosen['views']:,} | duration={chosen['duration']:.0f}s")
     return ("youtube",chosen["url"],credit)
 
 def font_path():
