@@ -335,7 +335,7 @@ def scene_url(excluded_urls=None):
                            "creator":item.get("channel") or item.get("uploader") or "غير محدد"})
     if not candidates:
         # Reuse a previous scene only when no fresh visual candidate is available.
-        previous=[e for e in ledger().get("clips",{}).values() if e.get("scene_url")]
+        previous=[e for e in ledger().get("clips",{}).values() if e.get("scene_url") and e.get("scene_url") not in excluded_urls]
         if previous:
             fallback=random.choice(previous)
             reused_url=fallback["scene_url"]
@@ -353,29 +353,126 @@ def font_path():
         if os.path.exists(p): return p
     return "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
-def make_video(audio,scene,out,reciter,verse_label):
-    scene_path=WORK/"scene.mp4"
-    if scene[0]=="youtube":
-        yt_download(scene[1],scene_path,audio=False)
-    else:
-        r=requests.get(scene[1],timeout=(15,120)); r.raise_for_status(); scene_path.write_bytes(r.content)
-    # Branding/logo screening disabled as requested.
-    dur=duration(audio)
-    img=Image.new("RGBA",(1080,1920),(0,0,0,0)); d=ImageDraw.Draw(img)
-    f=ImageFont.truetype(font_path(),CFG["visual_style"]["font_size"])
-    text="القرآن الكريم"; b=d.textbbox((0,0),text,font=f); x=(1080-(b[2]-b[0]))//2; y=CFG["visual_style"]["subtitle_y"]
-    d.text((x+3,y+5),text,font=f,fill=(0,0,0,190),stroke_width=3,stroke_fill=(0,0,0,160))
-    d.text((x,y),text,font=f,fill="white",stroke_width=1,stroke_fill="white")
-    sf=ImageFont.truetype(font_path(),30)
-    d.text((540,CFG["visual_style"]["reciter_y"]),f"{reciter}  •  {verse_label}",font=sf,anchor="ma",fill=(245,235,205,235))
-    overlay=WORK/"overlay.png"; img.save(overlay)
-    # One video encode only: scale/crop, darken, overlay text, and mux recitation.
-    sh(["ffmpeg","-y","-threads","2","-stream_loop","-1","-i",str(scene_path),"-i",str(audio),
-        "-loop","1","-i",str(overlay),
-        "-filter_complex",
-        "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,eq=brightness=-0.10:saturation=0.80[bg];[2:v]format=rgba[ov];[bg][ov]overlay=0:0:format=auto[v]",
-        "-map","[v]","-map","1:a:0","-t",f"{dur:.3f}","-c:v","libx264","-preset","veryfast",
-        "-crf","19","-threads","2","-c:a","aac","-b:a","192k","-shortest","-movflags","+faststart",str(out)])
+def select_scenes(excluded_urls=None, count=4):
+    excluded=set(excluded_urls or set())
+    selected=[]
+    for _ in range(count):
+        item=scene_url(excluded)
+        if item[1] in excluded:
+            raise RuntimeError("Could not find enough distinct visual scenes for this clip.")
+        selected.append(item)
+        excluded.add(item[1])
+    return selected
+
+def make_video(audio,scenes,out,reciter,verse_label):
+    if not isinstance(scenes,list): scenes=[scenes]
+    if len(scenes)<2: raise RuntimeError("At least two distinct scenes are required for a cinematic short.")
+    scene_paths=[]
+    try:
+        for i,scene in enumerate(scenes):
+            p=WORK/f"scene_{i}.mp4"
+            if scene[0]=="youtube": yt_download(scene[1],p,audio=False)
+            else:
+                r=requests.get(scene[1],timeout=(15,120)); r.raise_for_status(); p.write_bytes(r.content)
+            scene_paths.append(p)
+        dur=duration(audio)
+        img=Image.new("RGBA",(1080,1920),(0,0,0,0)); d=ImageDraw.Draw(img)
+        f=ImageFont.truetype(font_path(),CFG["visual_style"]["font_size"])
+        text="القرآن الكريم"; bb=d.textbbox((0,0),text,font=f); x=(1080-(bb[2]-bb[0]))//2; y=CFG["visual_style"]["subtitle_y"]
+        d.text((x+3,y+5),text,font=f,fill=(0,0,0,190),stroke_width=3,stroke_fill=(0,0,0,160))
+        d.text((x,y),text,font=f,fill="white",stroke_width=1,stroke_fill="white")
+        sf=ImageFont.truetype(font_path(),30)
+        d.text((540,CFG["visual_style"]["reciter_y"]),f"{reciter}  •  {verse_label}",font=sf,anchor="ma",fill=(245,235,205,235))
+        overlay=WORK/"overlay.png"; img.save(overlay)
+        cmd=["ffmpeg","-y","-threads","2"]
+        for p in scene_paths: cmd += ["-stream_loop","-1","-i",str(p)]
+        cmd += ["-i",str(audio),"-loop","1","-i",str(overlay)]
+        seg=dur/len(scene_paths); filters=[]; labels=[]
+        for i in range(len(scene_paths)):
+            filters.append(f"[{i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,eq=brightness=-0.10:saturation=0.80,trim=duration={seg:.3f},setpts=PTS-STARTPTS[v{i}]")
+            labels.append(f"[v{i}]")
+        filters.append("".join(labels)+f"concat=n={len(scene_paths)}:v=1:a=0[montage]")
+        oi=len(scene_paths)+1
+        filters.append(f"[{oi}:v]format=rgba[ov]")
+        filters.append("[montage][ov]overlay=0:0:format=auto[v]")
+        cmd += ["-filter_complex",";".join(filters),"-map","[v]","-map",f"{len(scene_paths)}:a:0",
+                "-t",f"{dur:.3f}","-c:v","libx264","-preset","veryfast","-crf","19",
+                "-threads","2","-c:a","aac","-b:a","192k","-shortest","-movflags","+faststart",str(out)]
+        sh(cmd)
+    finally:
+        for p in scene_paths: p.unlink(missing_ok=True)
+
+SPECIAL_SURAH_Q_URL="https://youtu.be/RqeOrREVOZE"
+
+def next_series_end(audio_path,start,total):
+    limit=min(58.0,max(0.0,total-start))
+    if limit<=0: return total
+    if limit<58.0: return total
+    p=subprocess.run(["ffmpeg","-hide_banner","-ss",f"{start:.3f}","-i",str(audio_path),
+                      "-t",f"{limit:.3f}","-af","silencedetect=noise=-32dB:d=0.25","-f","null","-"],
+                     capture_output=True,text=True)
+    import re
+    pauses=[float(x) for x in re.findall(r"silence_start: ([0-9.]+)",p.stderr or "")
+            if 42.0<=float(x)<=limit-0.25]
+    return min(total,start+(max(pauses) if pauses else limit))
+
+def advance_special_series(entry,led):
+    if entry.get("series_end") is None: return
+    series=led.get("special_series") or {}
+    start=float(entry.get("series_start",0)); end=float(entry["series_end"])
+    if float(series.get("next_start",0))<=start+0.05:
+        series["next_start"]=end
+        series["next_part"]=int(entry.get("series_part",series.get("next_part",1)))+1
+    if end>=float(series.get("duration",end))-0.25:
+        series["active"]=False
+        series["completed_at"]=int(time.time())
+        print("Special Surah Q series completed; returning to regular publishing.")
+    led["special_series"]=series; save_ledger(led)
+
+def publish_special_surah_part(led,clips,youtube_on,instagram_on):
+    series=led.setdefault("special_series",{"active":True,"url":SPECIAL_SURAH_Q_URL,
+        "reciter":"ياسر الدوسري","next_start":0.0,"next_part":1})
+    if not series.get("active",True): return False
+    if series.get("url")!=SPECIAL_SURAH_Q_URL:
+        raise RuntimeError("Special Surah Q source URL changed unexpectedly; refusing to mix recordings.")
+    if not series.get("duration"):
+        meta=video_metadata(SPECIAL_SURAH_Q_URL)
+        series["duration"]=float(meta.get("duration") or 0)
+        series["source_title"]=meta.get("title") or "سورة ق كاملة - ياسر الدوسري"
+        if series["duration"]<=0: raise RuntimeError("Could not determine the full Surah Q recording duration.")
+        save_ledger(led)
+    start=float(series.get("next_start",0)); total=float(series["duration"])
+    if start>=total-0.25:
+        series["active"]=False; save_ledger(led); return False
+    full=WORK/"special_surah_q_full.mp3"; full.unlink(missing_ok=True)
+    yt_download(SPECIAL_SURAH_Q_URL,full,audio=True)
+    end=next_series_end(full,start,total)
+    if end<=start: raise RuntimeError("Invalid Surah Q segment boundaries.")
+    part=int(series.get("next_part",1)); key=f"surahq_{part:03d}_{uuid.uuid4().hex[:6]}"
+    audio=WORK/(key+".mp3")
+    extract_audio(full,int(start*1000),int(end*1000),audio)
+    full.unlink(missing_ok=True)
+    previous={e.get("scene_url") for e in clips.values() if e.get("scene_url")}
+    scenes=select_scenes(previous,count=4)
+    out=WORK/(key+".mp4")
+    make_video(audio,scenes,out,"ياسر الدوسري",f"سورة ق • الجزء {part}")
+    public_url=cloudinary_upload(out) if instagram_on else None
+    title=f"سورة ق كاملة بصوت ياسر الدوسري | الجزء {part} #Shorts"
+    credits="\\n".join(f"المشهد {i+1}: {s[2]['title']} — {s[2]['creator']}\\nالمصدر: {s[2]['url']}" for i,s in enumerate(scenes))
+    caption=(f"سورة ق كاملة بصوت الشيخ ياسر الدوسري — الجزء {part}\\n"
+             "#سورة_ق #ياسر_الدوسري #القرآن #تلاوة #quran #shorts\\n\\n"
+             f"{credits}\\nالتعديلات: تقسيم التلاوة وإضافة مشاهد سينمائية متتابعة والنص.")
+    entry={"source_video_id":"RqeOrREVOZE","source_title":series.get("source_title"),
+        "reciter":"ياسر الدوسري","title":title,"caption":caption,"video_url":public_url,
+        "scene_url":scenes[0][1],"scene_urls":[s[1] for s in scenes],
+        "youtube_id":None,"instagram_id":None,"created_at":int(time.time()),
+        "series_start":start,"series_end":end,"series_part":part}
+    clips[key]=entry; save_ledger(led)
+    if not youtube_on and not instagram_on: raise RuntimeError("Both publishing platforms are disabled.")
+    publish_pending_clip(entry,led,out)
+    advance_special_series(entry,led)
+    print(f"Surah Q part {part} processed: {start:.2f}-{end:.2f}s of {total:.2f}s")
+    return True
 
 def cloudinary_upload(path):
     import cloudinary, cloudinary.uploader
@@ -457,8 +554,7 @@ def instagram_reel(url,caption):
     p.raise_for_status(); return p.json()["id"]
 
 def main():
-    led=ledger()
-    clips=led.setdefault("clips",{})
+    led=ledger(); clips=led.setdefault("clips",{})
     youtube_on=bool(CFG["publish"].get("youtube"))
     instagram_requested=bool(CFG["publish"].get("instagram"))
     instagram_secrets=["CLOUDINARY_CLOUD_NAME","CLOUDINARY_API_KEY","CLOUDINARY_API_SECRET","META_ACCESS_TOKEN","IG_USER_ID"]
@@ -466,35 +562,47 @@ def main():
     if instagram_requested and not instagram_on:
         print("Instagram is configured but its Cloudinary/Meta secrets are incomplete; YouTube can still publish.")
     if not youtube_on and not instagram_on: raise SystemExit("Both publishing platforms are disabled.")
+
+    # Finish any partially published clip before generating the next one.
     for clip_key,entry in clips.items():
         yt_done=(not youtube_on) or bool(entry.get("youtube_id"))
         ig_done=(not instagram_on) or bool(entry.get("instagram_id"))
-        if entry.get("video_url") and not (yt_done and ig_done):
-            publish_pending_clip(entry,led,WORK/(clip_key+".mp4")); return
-    # Reuse of a recitation is allowed. Give every generated video its own key
-    # so the ledger/cache never blocks a previously published source recording.
+        if not (yt_done and ig_done):
+            local=WORK/(clip_key+".mp4")
+            if entry.get("video_url") or local.exists():
+                publish_pending_clip(entry,led,local)
+                advance_special_series(entry,led)
+                return
+
+    if led.get("special_series") is None:
+        led["special_series"]={"active":True,"url":SPECIAL_SURAH_Q_URL,"reciter":"ياسر الدوسري",
+                               "next_start":0.0,"next_part":1}
+        save_ledger(led)
+    if led.get("special_series",{}).get("active",True):
+        publish_special_surah_part(led,clips,youtube_on,instagram_on)
+        return
+
+    # Once all of Surah Q is posted, return to the existing regular rotation.
     selected=discover_recitation(set())
-    clip_key=uuid.uuid4().hex[:12]
-    audio=WORK/(clip_key+".mp3")
+    key=uuid.uuid4().hex[:12]; audio=WORK/(key+".mp3")
     if not audio.exists(): download_complete_short(selected["url"],audio,selected["duration"])
-    out=WORK/(clip_key+".mp4")
-    previous_scenes={e.get("scene_url") for e in clips.values() if e.get("scene_url")}
-    scene=scene_url(previous_scenes)
-    make_video(audio,scene,out,selected["reciter"],"تلاوة كاملة")
+    out=WORK/(key+".mp4")
+    previous={e.get("scene_url") for e in clips.values() if e.get("scene_url")}
+    scenes=select_scenes(previous,count=4)
+    make_video(audio,scenes,out,selected["reciter"],"تلاوة كاملة")
     public_url=cloudinary_upload(out) if instagram_on else None
     title=f"تلاوة قرآنية خاشعة | {selected['reciter']} #Shorts"
-    audio_credit=(f"الصوت: {selected['credit_title']} — {selected['credit_creator']}\n"
+    audio_credit=(f"الصوت: {selected['credit_title']} — {selected['credit_creator']}\\n"
                   f"المصدر: {selected['credit_url']}")
-    visual_credit=(f"المشاهد: {scene[2]['title']} — {scene[2]['creator']}\n"
-                   f"المصدر: {scene[2]['url']}")
-    caption=(f"تلاوة قرآنية بصوت {selected['reciter']}\nاللهم اجعل القرآن ربيع قلوبنا.\n"
-             "#القرآن #قرآن #تلاوة #ياسر_الدوسري #عبدالرحمن_مسعد #quran #shorts\n\n"
-             f"{audio_credit}\n\n{visual_credit}\n"
+    visual_credit="\\n".join(f"المشهد {i+1}: {s[2]['title']} — {s[2]['creator']}\\nالمصدر: {s[2]['url']}" for i,s in enumerate(scenes))
+    caption=(f"تلاوة قرآنية بصوت {selected['reciter']}\\nاللهم اجعل القرآن ربيع قلوبنا.\\n"
+             "#القرآن #قرآن #تلاوة #ياسر_الدوسري #عبدالرحمن_مسعد #quran #shorts\\n\\n"
+             f"{audio_credit}\\n\\n{visual_credit}\\n"
              "التعديلات: استخراج الصوت، قصّ المشاهد ودمجها مع التلاوة والنص.")
     entry={"source_video_id":selected["id"],"source_title":selected["title"],"source_views":selected["views"],
-           "reciter":selected["reciter"],"title":title,"caption":caption,"video_url":public_url,"scene_url":scene[1],
-           "youtube_id":None,"instagram_id":None,"created_at":int(time.time())}
-    clips[clip_key]=entry; save_ledger(led)
+        "reciter":selected["reciter"],"title":title,"caption":caption,"video_url":public_url,
+        "scene_url":scenes[0][1],"scene_urls":[s[1] for s in scenes],
+        "youtube_id":None,"instagram_id":None,"created_at":int(time.time())}
+    clips[key]=entry; save_ledger(led)
     publish_pending_clip(entry,led,out)
-
 if __name__=="__main__": main()
