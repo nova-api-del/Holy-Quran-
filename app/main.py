@@ -425,7 +425,7 @@ def make_video(audio,scenes,out,reciter,verse_label):
         cmd += ["-i",str(audio),"-loop","1","-i",str(overlay)]
         seg=dur/len(scene_paths); filters=[]; labels=[]
         for i in range(len(scene_paths)):
-            filters.append(f"[{i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,eq=brightness=-0.10:saturation=0.80,trim=duration={seg:.3f},setpts=PTS-STARTPTS[v{i}]")
+            filters.append(f"[{i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30,format=yuv420p,eq=brightness=-0.10:saturation=0.80,trim=duration={seg:.3f},settb=AVTB,setpts=PTS-STARTPTS[v{i}]")
             labels.append(f"[v{i}]")
         filters.append("".join(labels)+f"concat=n={len(scene_paths)}:v=1:a=0[montage]")
         oi=len(scene_paths)+1
