@@ -298,18 +298,15 @@ def extract_audio(source_audio, start_ms, end_ms, out):
         "-t",f"{(end_ms-start_ms)/1000:.3f}","-vn","-c:a","libmp3lame","-q:a","2",str(out)])
 
 def scene_url(excluded_urls=None):
+    excluded_urls=set(excluded_urls or set())
+    configured=[x for x in CFG.get("visual_sources",[]) if x.get("enabled") and x.get("url")]
+    fresh_configured=[x for x in configured if x.get("url") not in excluded_urls]
+    if fresh_configured:
+        source=random.choice(fresh_configured)
+        return ("youtube",source["url"],{"title":source.get("title") or "YouTube visual footage",
+                                        "creator":source.get("creator") or "غير محدد",
+                                        "url":source["url"]})
 
-    excluded_urls=excluded_urls or set()
-    configured=[x for x in CFG.get("visual_sources",[]) if x.get("enabled") and x.get("url") and x.get("url") not in excluded_urls]
-    if configured:
-        fresh_configured=[x for x in configured if x.get("url") not in excluded_urls]
-        if fresh_configured:
-            source=random.choice(fresh_configured)
-            return ("youtube",source["url"],{"title":source.get("title") or "YouTube visual footage",
-                                            "creator":source.get("creator") or "غير محدد",
-                                            "url":source["url"]})
-    # Search for beautiful, calm, cinematic backgrounds that suit Quran recitations.
-    # Rotate landscapes so consecutive videos do not keep the same visual mood.
     queries=[
         "cinematic nature landscape drone footage mountains clouds golden hour",
         "beautiful desert dunes sunrise sunset golden sunlight cinematic video",
@@ -322,45 +319,56 @@ def scene_url(excluded_urls=None):
         "beautiful peaceful nature scenery mountains rivers sunrise",
         "cinematic landscape nature footage 1080p 4K"
     ]
-    query=random.choice(queries)
-    p=subprocess.run(
-        YTDLP+["--flat-playlist","--dump-single-json","--socket-timeout","30",
-               "--retries","5","--extractor-retries","5",f"ytsearch100:{query}"],
-        capture_output=True,text=True,check=True,timeout=180
-    )
-    data=json.loads(p.stdout)
+
     candidates=[]
-    for item in data.get("entries",[]):
-        vid=item.get("id")
-        if not vid: continue
-        source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
-        if source_url in excluded_urls: continue
-        title=item.get("title") or "YouTube visual footage"
-        low=title.lower()
-        # Avoid obvious non-cinematic/search-noise results.
-        bad_terms=("shorts","reaction","compilation","music","lyrics","news","review")
-        if any(term in low for term in bad_terms): continue
-        candidates.append({"url":source_url,"title":title,
-                           "creator":item.get("channel") or item.get("uploader") or "غير محدد",
-                           "views":int(item.get("view_count") or 0),
-                           "duration":float(item.get("duration") or 0)})
+    random.shuffle(queries)
+    for query in queries[:5]:
+        try:
+            p=subprocess.run(
+                YTDLP+["--flat-playlist","--dump-single-json","--socket-timeout","30",
+                       "--retries","5","--extractor-retries","5",f"ytsearch100:{query}"],
+                capture_output=True,text=True,check=True,timeout=180
+            )
+            data=json.loads(p.stdout)
+        except Exception as e:
+            print(f"Visual search failed for '{query}': {e}")
+            continue
+        for item in data.get("entries",[]):
+            vid=item.get("id")
+            if not vid: continue
+            source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
+            if source_url in excluded_urls: continue
+            title=item.get("title") or "YouTube visual footage"
+            low=title.lower()
+            bad_terms=("shorts","reaction","compilation","lyrics","news","review","music")
+            if any(term in low for term in bad_terms): continue
+            candidates.append({
+                "url":source_url,"title":title,
+                "creator":item.get("channel") or item.get("uploader") or "غير محدد",
+                "views":int(item.get("view_count") or 0),
+                "duration":float(item.get("duration") or 0)
+            })
+        if len(candidates)>=50:
+            break
+
+    unique={x["url"]:x for x in candidates}
+    candidates=list(unique.values())
+
     if not candidates:
-        # Reuse a previous scene only when no fresh visual candidate is available.
-        previous=[e for e in ledger().get("clips",{}).values()
-                  for u in (e.get("scene_urls") or [e.get("scene_url")])
-                  if u and u not in excluded_urls]
+        previous=[]
+        for e in ledger().get("clips",{}).values():
+            for u in (e.get("scene_urls") or [e.get("scene_url")]):
+                if u and u not in excluded_urls:
+                    previous.append(u)
         if previous:
             reused_url=random.choice(previous)
-            print("No fresh visual candidates found; reusing a previous scene as fallback.")
+            print("Fresh visual search failed; emergency reuse keeps publishing alive.")
             return ("youtube",reused_url,{"title":"مشهد سابق من فيديو منشور",
-                                          "creator":"مصدر مستخدم سابقاً",
-                                          "url":reused_url})
-        raise RuntimeError("No visual footage candidates were found and no previous scene is available.")
+                                          "creator":"مصدر مستخدم سابقاً","url":reused_url})
+        raise RuntimeError("No visual footage candidates were found.")
 
-    # Do not take the first search result. Prefer established, longer footage
-    # and rank by popularity, then randomly choose among the strongest candidates.
-    candidates.sort(key=lambda x:(x["views"], min(x["duration"],600)), reverse=True)
-    pool=candidates[:min(25,len(candidates))]
+    candidates.sort(key=lambda x:(x["views"],min(x["duration"],600)),reverse=True)
+    pool=candidates[:min(60,len(candidates))]
     chosen=random.choice(pool)
     credit={"title":chosen["title"],"creator":chosen["creator"],"url":chosen["url"]}
     print(f"Selected visual: {chosen['title']} | views={chosen['views']:,} | duration={chosen['duration']:.0f}s")
