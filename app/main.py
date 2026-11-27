@@ -91,32 +91,67 @@ def video_metadata(url):
     return json.loads(p.stdout)
 
 def discover_recitation(used_ids):
-    queries=[("yasser_al_dosari","ياسر الدوسري قرآن آيات قصيرة"),("abdulrahman_al_mossad","عبدالرحمن مسعد قرآن آيات قصيرة")]
+    # Search broadly for Quran recitations instead of restricting the project
+    # to specific reciters. The only hard limit is the final published clip:
+    # never longer than 58 seconds.
+    queries=[
+        "تلاوة قرآن كريم خاشعة",
+        "تلاوة القرآن الكريم",
+        "قرآن كريم تلاوة جميلة",
+        "Quran recitation beautiful",
+        "Quran recitation emotional",
+        "تلاوة قرآن آيات"
+    ]
     candidates=[]
-    for rid,query in queries:
+    used_ids=set(used_ids or set())
+
+    for query in queries:
         try:
-            p=subprocess.run(YTDLP+["--flat-playlist","--dump-single-json",f"ytsearch100:{query}"],capture_output=True,text=True,check=True,timeout=240)
+            p=subprocess.run(
+                YTDLP+["--flat-playlist","--dump-single-json","--socket-timeout","30",
+                       "--retries","5","--extractor-retries","5",f"ytsearch100:{query}"],
+                capture_output=True,text=True,check=True,timeout=240
+            )
             data=json.loads(p.stdout)
         except Exception as e:
-            print(f"Search failed for {rid}: {e}"); continue
+            print(f"Search failed for '{query}': {e}")
+            continue
+
         for item in data.get("entries",[]):
             vid=item.get("id"); dur=item.get("duration"); title=item.get("title") or ""
-            if not vid or not dur: continue  # Repeated recitations are allowed; only the extracted clip is capped.
+            if not vid or not dur or vid in used_ids:
+                continue
             low=title.lower()
-            terms=["ياسر","الدوسري","yasser","dosari"] if rid=="yasser_al_dosari" else ["عبدالرحمن","مسعد","abdurrahman","abdulrahman","mossad"]
-            if not any(t in low for t in terms): continue
-            views=int(item.get("view_count") or 0)  # No minimum-view threshold.
+            # Keep the source focused on Quran recitation, while allowing any
+            # reciter/channel instead of maintaining a hard-coded reciter list.
+            if not any(term in low for term in ("قرآن","القرآن","تلاوة","quran","recitation","tilawah")):
+                continue
+            views=int(item.get("view_count") or 0)
             source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
-            # The user confirms they have direct permission to publish these reciters' recordings.
-            # User permission covers the selected recitation sources.
-            candidates.append({"id":vid,"url":source_url,"title":title,"views":views,"duration":float(dur),"reciter_id":rid,
-                              "credit_title":title,"credit_creator":rid,"credit_url":source_url})
-    if not candidates: raise RuntimeError("لم نعثر على مقاطع قصيرة مناسبة للقارئين. جرّب التشغيل لاحقاً.")
-    # Popularity is not a selection criterion: either requested reciter is acceptable.
+            candidates.append({
+                "id":vid,"url":source_url,"title":title,"views":views,
+                "duration":float(dur),
+                "reciter_id":None,
+                "credit_title":title,
+                "credit_creator":item.get("channel") or item.get("uploader") or "غير محدد",
+                "credit_url":source_url
+            })
+
+        if len(candidates) >= 60:
+            break
+
+    if not candidates:
+        raise RuntimeError("لم نعثر على تلاوات قرآن متاحة. جرّب التشغيل لاحقاً.")
+
+    # Randomize among many valid search results so the same source is not
+    # repeatedly preferred. Popularity is only a weak tie-breaker.
     random.shuffle(candidates)
-    selected=candidates[0]
-    selected["reciter"]=next(x["name_ar"] for x in CFG["reciters"] if x["id"]==selected["reciter_id"])
-    print(f"Selected recitation source: {selected['title']} | reciter={selected['reciter']}")
+    selected=random.choice(candidates[:min(60,len(candidates))])
+
+    # Use the actual source title as the reciter label when the channel/metadata
+    # does not expose a reliable reciter name.
+    selected["reciter"]=selected["credit_creator"]
+    print(f"Selected recitation source: {selected['title']} | creator={selected['credit_creator']}")
     return selected
 
 def review_recitation_audio(audio_path):
@@ -170,59 +205,40 @@ def review_recitation_audio(audio_path):
     raise RuntimeError(f"All Gemini 3 fallback models failed. Last error: {last_error}")
 
 def download_complete_short(url, audio_out, source_duration=None):
+    # Hard publication limit: the final Quran clip can never exceed 58 seconds.
     max_seconds=min(58,int(CFG["publish"].get("max_seconds",58)))
+    if max_seconds <= 0:
+        raise RuntimeError("max_seconds must be greater than zero.")
+
     total=float(source_duration or max_seconds)
-    base=YTDLP+["--no-playlist","--socket-timeout","30","--retries","10","--fragment-retries","10",
-                "--extractor-retries","5","--concurrent-fragments","8"]
+    base=YTDLP+["--no-playlist","--socket-timeout","30","--retries","10",
+                "--fragment-retries","10","--extractor-retries","5","--concurrent-fragments","8"]
     cookies=yt_cookie_file()
     if cookies: base += ["--cookies",str(cookies)]
-    # For short source recordings, use the entire source so its ending is preserved.
+
+    # Do not require Gemini to approve a verse boundary and do not reject a
+    # recitation merely because it is long. Any selected recitation is accepted;
+    # only the published clip length is capped at 58 seconds.
     if total <= max_seconds:
-        start=0.0; end=total
-        print("Source is already <=58s; preserving the complete recitation.")
+        start=0.0
+        end=total
+        print(f"Source is {total:.2f}s; preserving the complete recitation.")
     else:
-        # Try several positions; Gemini judges performance/tajweed and proposes complete-ayah boundaries.
-        sample_len=min(total,78.0)
-        max_start=max(0.0,total-sample_len)
-        starts=sorted(set(round(max_start*x,2) for x in (0.03,0.30,0.58,0.86)))
-        reviewed=[]
-        for i,point in enumerate(starts):
-            preview=WORK/f"recitation_review_{i}.mp3"
-            preview.unlink(missing_ok=True)
-            stop=min(total,point+sample_len)
-            try:
-                sh(base+["--download-sections",f"*{point}-{stop}","-f","bestaudio/best",
-                     "-x","--audio-format","mp3","--force-overwrites","-o",str(preview),url])
-                verdict=review_recitation_audio(preview)
-                if verdict["start"] is not None and verdict["end"] is not None:
-                    absolute_start=point+verdict["start"]
-                    absolute_end=point+verdict["end"]
-                    if (0 <= verdict["start"] < verdict["end"] <= stop-point
-                            and absolute_start >= point-0.5
-                            and absolute_end-absolute_start <= max_seconds
-                            and absolute_end <= total+0.5):
-                        reviewed.append((verdict["score"],absolute_start,absolute_end,verdict["notes"]))
-                        print(f"Recitation review {i+1}: score={verdict['score']:.1f}/10 | {verdict['notes']}")
-                    else: print(f"Recitation review {i+1}: proposed range is outside limits.")
-                else: print(f"Recitation review {i+1}: no confident complete-ayah boundaries.")
-            except Exception as e:
-                print(f"Recitation review {i+1} failed: {e}")
-            finally:
-                preview.unlink(missing_ok=True)
-        if reviewed:
-            # Prefer the best performance score; if scores are effectively tied,
-            # randomize among verified complete-ayah segments only.
-            top=max(x[0] for x in reviewed)
-            finalists=[x for x in reviewed if x[0] >= top-0.25]
-            score,start,end,notes=random.choice(finalists)
-            print(f"Complete-ayah recitation selected: {start:.2f}-{end:.2f}s | score={score:.1f}/10 | {notes}")
-        else:
-            # No arbitrary 58-second crop: without verified ayah boundaries we cannot
-            # guarantee the recitation will not be cut mid-ayah.
-            raise RuntimeError("لم أتمكن من تحديد حدود آيات مكتملة بثقة. لم أنشر مقطعاً عشوائياً حتى لا تُقطع آية؛ أعد التشغيل لاختيار تسجيل آخر للقارئ نفسه أو القارئ الآخر.")
+        start=0.0
+        end=float(max_seconds)
+        print(f"Selected recitation is {total:.2f}s; taking the first {max_seconds}s.")
+
     audio_out.unlink(missing_ok=True)
     sh(base+["--download-sections",f"*{start}-{end}","-f","bestaudio/best",
          "-x","--audio-format","mp3","--force-overwrites","-o",str(audio_out),url])
+
+    # Verify the generated audio itself never exceeds the hard 58-second limit.
+    actual=duration(audio_out)
+    if actual > max_seconds + 0.25:
+        trimmed=audio_out.with_name(audio_out.stem+".58s.mp3")
+        sh(["ffmpeg","-y","-i",str(audio_out),"-t",str(max_seconds),
+            "-c:a","libmp3lame","-q:a","2",str(trimmed)])
+        trimmed.replace(audio_out)
 
 def duration(p):
     r=subprocess.run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(p)],capture_output=True,text=True,check=True)
@@ -622,9 +638,22 @@ def main():
                 return
 
     # Once all of Surah Q is posted, return to the existing regular rotation.
-    selected=discover_recitation(set())
-    key=uuid.uuid4().hex[:12]; audio=WORK/(key+".mp3")
-    if not audio.exists(): download_complete_short(selected["url"],audio,selected["duration"])
+    # If one YouTube source is unavailable, discard it and immediately try another
+    # Quran recitation instead of failing the whole workflow.
+    failed_sources=set()
+    for attempt in range(12):
+        selected=discover_recitation(failed_sources)
+        key=uuid.uuid4().hex[:12]; audio=WORK/(key+".mp3")
+        try:
+            if not audio.exists():
+                download_complete_short(selected["url"],audio,selected["duration"])
+            break
+        except Exception as e:
+            failed_sources.add(selected["id"])
+            audio.unlink(missing_ok=True)
+            print(f"Recitation source unavailable/download failed (attempt {attempt+1}/12): {e}")
+            if attempt == 11:
+                raise RuntimeError("تعذر تنزيل أي تلاوة قرآن متاحة بعد 12 محاولة.") from e
     out=WORK/(key+".mp4")
     previous={e.get("scene_url") for e in clips.values() if e.get("scene_url")}
     scenes=select_scenes(previous,count=4)
