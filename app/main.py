@@ -311,22 +311,39 @@ def scene_url(excluded_urls=None):
                                         "creator":source.get("creator") or "غير محدد",
                                         "url":source["url"]})
 
-    queries=[
-        "cinematic nature landscape drone footage mountains clouds golden hour",
-        "beautiful desert dunes sunrise sunset golden sunlight cinematic video",
-        "sun rays through clouds mountains valley peaceful cinematic scenery",
-        "ocean waves coastline sunset aerial cinematic nature video",
-        "forest waterfall river mist morning light cinematic scenery",
-        "starry night sky milky way mountains peaceful cinematic landscape",
-        "mosque architecture courtyard sunset peaceful cinematic footage",
-        "green valleys hills flowers breeze aerial nature cinematic video",
-        "beautiful peaceful nature scenery mountains rivers sunrise",
-        "cinematic landscape nature footage 1080p 4K"
+    # The reference videos use simple, real footage: ocean/nature in one style
+    # and real animals (such as cats) in the other. Do not search for films,
+    # trailers, airplanes, cities, people, gaming, or stock-style compilations.
+    nature_queries=[
+        "real ocean waves sunset nature footage",
+        "real sea waves beach sunset 4k footage",
+        "mountains clouds valley nature footage 4k",
+        "waterfall river forest nature footage 4k",
+        "rain clouds sky ocean nature footage 4k",
+        "desert mountains sunset real nature footage 4k"
     ]
+    animal_queries=[
+        "real cat animal footage 4k",
+        "real birds wildlife footage 4k",
+        "real horses animal footage 4k",
+        "real deer wildlife nature footage 4k",
+        "real dolphins ocean wildlife footage 4k",
+        "real wild animals nature footage 4k"
+    ]
+    # Keep one visual family per generated video, matching the two reference styles.
+    queries=random.choice([nature_queries, animal_queries])
+
+    blocked_terms=(
+        "airplane","airplanes","plane","flight","airport","aircraft","jet",
+        "movie","film","trailer","short film","cinema","cinematic",
+        "drama","commercial","advertisement","music video","vlog",
+        "compilation","top 10","people","interview","gaming","gameplay",
+        "city","car","cars","truck","drone","war","military"
+    )
 
     candidates=[]
     random.shuffle(queries)
-    for query in queries[:5]:
+    for query in queries[:4]:
         try:
             p=subprocess.run(
                 YTDLP+["--flat-playlist","--dump-single-json","--socket-timeout","30",
@@ -337,20 +354,22 @@ def scene_url(excluded_urls=None):
         except Exception as e:
             print(f"Visual search failed for '{query}': {e}")
             continue
+
         for item in data.get("entries",[]):
             vid=item.get("id")
             if not vid: continue
             source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
             if source_url in excluded_urls: continue
             title=item.get("title") or "YouTube visual footage"
-            # Do not reject videos by title keywords: Shorts, compilations,
-            # and other formats may contain excellent cinematic footage.
-            # Rank candidates using available metadata, then let the actual
-            # downloaded frames determine visual suitability.
             low=title.lower()
-            quality_terms=("4k","uhd","cinematic","drone","aerial","nature","landscape",
-                           "scenery","relaxing","beautiful","8k","hdr")
+            if any(term in low for term in blocked_terms):
+                continue
+
+            quality_terms=("4k","uhd","2160p","1440p","1080p","8k","hdr","wildlife",
+                           "nature","ocean","sea","waves","mountain","forest","cat",
+                           "bird","horse","deer","dolphin")
             quality_hint=sum(1 for term in quality_terms if term in low)
+
             candidates.append({
                 "url":source_url,"title":title,
                 "creator":item.get("channel") or item.get("uploader") or "غير محدد",
@@ -358,30 +377,23 @@ def scene_url(excluded_urls=None):
                 "duration":float(item.get("duration") or 0),
                 "quality_hint":quality_hint
             })
-        if len(candidates)>=50:
+        if len(candidates)>=40:
             break
 
     unique={x["url"]:x for x in candidates}
     candidates=list(unique.values())
 
     if not candidates:
-        previous=[]
-        for e in ledger().get("clips",{}).values():
-            for u in (e.get("scene_urls") or [e.get("scene_url")]):
-                if u and u not in excluded_urls:
-                    previous.append(u)
-        if previous:
-            reused_url=random.choice(previous)
-            print("Fresh visual search failed; emergency reuse keeps publishing alive.")
-            return ("youtube",reused_url,{"title":"مشهد سابق من فيديو منشور",
-                                          "creator":"مصدر مستخدم سابقاً","url":reused_url})
-        raise RuntimeError("No visual footage candidates were found.")
+        raise RuntimeError("No suitable real nature/animal visual footage was found.")
 
-    candidates.sort(key=lambda x:(x["quality_hint"],x["views"],min(x["duration"],600)),reverse=True)
-    pool=candidates[:min(60,len(candidates))]
+    # Prefer footage whose title signals real high-resolution nature/animal content.
+    # Popularity is only a weak tie-breaker; it must never override the content filter.
+    candidates.sort(key=lambda x:(x["quality_hint"],min(x["duration"],600),x["views"]),reverse=True)
+    pool=candidates[:min(25,len(candidates))]
     chosen=random.choice(pool)
+
     credit={"title":chosen["title"],"creator":chosen["creator"],"url":chosen["url"]}
-    print(f"Selected visual: {chosen['title']} | views={chosen['views']:,} | duration={chosen['duration']:.0f}s")
+    print(f"Selected visual: {chosen['title']} | quality_hint={chosen['quality_hint']} | views={chosen['views']:,}")
     return ("youtube",chosen["url"],credit)
 
 def font_path():
@@ -425,7 +437,7 @@ def make_video(audio,scenes,out,reciter,verse_label):
         cmd += ["-i",str(audio),"-loop","1","-i",str(overlay)]
         seg=dur/len(scene_paths); filters=[]; labels=[]
         for i in range(len(scene_paths)):
-            filters.append(f"[{i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30,format=yuv420p,eq=brightness=-0.10:saturation=0.80,trim=duration={seg:.3f},settb=AVTB,setpts=PTS-STARTPTS[v{i}]")
+            filters.append(f"[{i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30,format=yuv420p,eq=brightness=-0.06:saturation=0.90,trim=duration={seg:.3f},settb=AVTB,setpts=PTS-STARTPTS[v{i}]")
             labels.append(f"[v{i}]")
         filters.append("".join(labels)+f"concat=n={len(scene_paths)}:v=1:a=0[montage]")
         oi=len(scene_paths)+1
