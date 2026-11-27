@@ -301,7 +301,7 @@ def extract_audio(source_audio, start_ms, end_ms, out):
     sh(["ffmpeg","-y","-ss",f"{start_ms/1000:.3f}","-i",str(source_audio),
         "-t",f"{(end_ms-start_ms)/1000:.3f}","-vn","-c:a","libmp3lame","-q:a","2",str(out)])
 
-def scene_url(excluded_urls=None):
+def scene_url(excluded_urls=None, style="cinematic"):
     excluded_urls=set(excluded_urls or set())
     configured=[x for x in CFG.get("visual_sources",[]) if x.get("enabled") and x.get("url")]
     fresh_configured=[x for x in configured if x.get("url") not in excluded_urls]
@@ -311,8 +311,11 @@ def scene_url(excluded_urls=None):
                                         "creator":source.get("creator") or "غير محدد",
                                         "url":source["url"]})
 
-    queries=[
-        "cinematic nature landscape drone footage mountains clouds golden hour",
+    # Keep each short visually coherent: one of two styles is selected per video.
+    # Cinematic style: landscapes, oceans, skies and atmospheric nature footage.
+    # Real-life style: animals, birds, wildlife and everyday outdoor scenes.
+    cinematic_queries=[
+        "cinematic nature landscape drone footage mountains clouds golden hour 4K",
         "beautiful desert dunes sunrise sunset golden sunlight cinematic video",
         "sun rays through clouds mountains valley peaceful cinematic scenery",
         "ocean waves coastline sunset aerial cinematic nature video",
@@ -321,8 +324,21 @@ def scene_url(excluded_urls=None):
         "mosque architecture courtyard sunset peaceful cinematic footage",
         "green valleys hills flowers breeze aerial nature cinematic video",
         "beautiful peaceful nature scenery mountains rivers sunrise",
-        "cinematic landscape nature footage 1080p 4K"
+        "cinematic landscape nature footage 1080p 4K HDR"
     ]
+    realistic_queries=[
+        "beautiful realistic wildlife animals in nature 4K video",
+        "cinematic close up birds flying feeding in forest nature video",
+        "cats kittens playing walking outdoors realistic video 4K",
+        "horses running freely in green field cinematic wildlife footage",
+        "deer fox rabbits wild animals natural habitat documentary video",
+        "elephants giraffes lions wildlife safari nature footage 4K",
+        "colorful butterflies bees flowers macro nature video",
+        "dolphins whales sea turtles underwater wildlife footage",
+        "peaceful countryside village daily life outdoor cinematic video",
+        "rainy streets people walking city life realistic cinematic footage"
+    ]
+    queries=cinematic_queries if style=="cinematic" else realistic_queries
 
     candidates=[]
     random.shuffle(queries)
@@ -389,15 +405,17 @@ def font_path():
         if os.path.exists(p): return p
     return "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
-def select_scenes(excluded_urls=None, count=4):
+def select_scenes(excluded_urls=None, count=4, style=None):
     excluded=set(excluded_urls or set())
+    style=style or random.choice(["cinematic","realistic"])
     selected=[]
     for _ in range(count):
-        item=scene_url(excluded)
+        item=scene_url(excluded,style=style)
         if item[1] in excluded:
             raise RuntimeError("Could not find enough distinct visual scenes for this clip.")
         selected.append(item)
         excluded.add(item[1])
+    print(f"Visual style selected: {style}")
     return selected
 
 def make_video(audio,scenes,out,reciter,verse_label):
@@ -615,7 +633,8 @@ def main():
     if not audio.exists(): download_complete_short(selected["url"],audio,selected["duration"])
     out=WORK/(key+".mp4")
     previous={e.get("scene_url") for e in clips.values() if e.get("scene_url")}
-    scenes=select_scenes(previous,count=4)
+    visual_style=random.choice(["cinematic","realistic"])
+    scenes=select_scenes(previous,count=4,style=visual_style)
     make_video(audio,scenes,out,selected["reciter"],"تلاوة كاملة")
     public_url=cloudinary_upload(out) if instagram_on else None
     title=f"تلاوة قرآنية خاشعة | {selected['reciter']} #Shorts"
@@ -627,7 +646,7 @@ def main():
              f"{audio_credit}\n\n{visual_credit}\n"
              "التعديلات: استخراج الصوت، قصّ المشاهد ودمجها مع التلاوة والنص.")
     entry={"source_video_id":selected["id"],"source_title":selected["title"],"source_views":selected["views"],
-        "reciter":selected["reciter"],"title":title,"caption":caption,"video_url":public_url,
+        "reciter":selected["reciter"],"visual_style":visual_style,"title":title,"caption":caption,"video_url":public_url,
         "scene_url":scenes[0][1],"scene_urls":[s[1] for s in scenes],
         "youtube_id":None,"instagram_id":None,"created_at":int(time.time())}
     clips[key]=entry; save_ledger(led)
