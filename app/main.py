@@ -91,21 +91,16 @@ def video_metadata(url):
     return json.loads(p.stdout)
 
 def discover_recitation(used_ids):
-    # Search broadly for Quran recitations instead of restricting the project
-    # to specific reciters. The only hard limit is the final published clip:
-    # never longer than 58 seconds.
+    # Keep the two requested reciters only: Yasser Al-Dosari and Abdulrahman Al-Mossad.
+    # Do not apply any YouTube license filter to visual footage; visuals may be
+    # downloaded regardless of the license metadata returned by YouTube.
     queries=[
-        "تلاوة قرآن كريم خاشعة",
-        "تلاوة القرآن الكريم",
-        "قرآن كريم تلاوة جميلة",
-        "Quran recitation beautiful",
-        "Quran recitation emotional",
-        "تلاوة قرآن آيات"
+        ("yasser_al_dosari","ياسر الدوسري قرآن آيات قصيرة"),
+        ("abdulrahman_al_mossad","عبدالرحمن مسعد قرآن آيات قصيرة")
     ]
     candidates=[]
     used_ids=set(used_ids or set())
-
-    for query in queries:
+    for rid,query in queries:
         try:
             p=subprocess.run(
                 YTDLP+["--flat-playlist","--dump-single-json","--socket-timeout","30",
@@ -114,44 +109,29 @@ def discover_recitation(used_ids):
             )
             data=json.loads(p.stdout)
         except Exception as e:
-            print(f"Search failed for '{query}': {e}")
+            print(f"Search failed for {rid}: {e}")
             continue
-
         for item in data.get("entries",[]):
             vid=item.get("id"); dur=item.get("duration"); title=item.get("title") or ""
             if not vid or not dur or vid in used_ids:
                 continue
             low=title.lower()
-            # Keep the source focused on Quran recitation, while allowing any
-            # reciter/channel instead of maintaining a hard-coded reciter list.
-            if not any(term in low for term in ("قرآن","القرآن","تلاوة","quran","recitation","tilawah")):
+            terms=["ياسر","الدوسري","yasser","dosari"] if rid=="yasser_al_dosari" else ["عبدالرحمن","مسعد","abdurrahman","abdulrahman","mossad"]
+            if not any(term in low for term in terms):
                 continue
-            views=int(item.get("view_count") or 0)
             source_url=item.get("url") or f"https://www.youtube.com/watch?v={vid}"
             candidates.append({
-                "id":vid,"url":source_url,"title":title,"views":views,
-                "duration":float(dur),
-                "reciter_id":None,
-                "credit_title":title,
-                "credit_creator":item.get("channel") or item.get("uploader") or "غير محدد",
-                "credit_url":source_url
+                "id":vid,"url":source_url,"title":title,
+                "views":int(item.get("view_count") or 0),
+                "duration":float(dur),"reciter_id":rid,
+                "credit_title":title,"credit_creator":rid,"credit_url":source_url
             })
-
-        if len(candidates) >= 60:
-            break
-
     if not candidates:
-        raise RuntimeError("لم نعثر على تلاوات قرآن متاحة. جرّب التشغيل لاحقاً.")
-
-    # Randomize among many valid search results so the same source is not
-    # repeatedly preferred. Popularity is only a weak tie-breaker.
+        raise RuntimeError("لم نعثر على تلاوات متاحة لياسر الدوسري أو عبدالرحمن مسعد. جرّب التشغيل لاحقاً.")
     random.shuffle(candidates)
-    selected=random.choice(candidates[:min(60,len(candidates))])
-
-    # Use the actual source title as the reciter label when the channel/metadata
-    # does not expose a reliable reciter name.
-    selected["reciter"]=selected["credit_creator"]
-    print(f"Selected recitation source: {selected['title']} | creator={selected['credit_creator']}")
+    selected=candidates[0]
+    selected["reciter"]=next(x["name_ar"] for x in CFG["reciters"] if x["id"]==selected["reciter_id"])
+    print(f"Selected recitation source: {selected['title']} | reciter={selected['reciter']}")
     return selected
 
 def review_recitation_audio(audio_path):
